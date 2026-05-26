@@ -12,9 +12,9 @@ The `benchmarking_dataset` folder contains:
 
 - A python script (with reproducible seeds) to randomly generate pairwise-decomposable cost function networks (CFNs) in the input format specified by [Toulbar2](https://github.com/toulbar2/toulbar2) (v1.2.1);  
 - The CFNs generated using this script used in the above manuscript, where:
-	- The number of variables $N\in\{2,4,6,8,10,12,14,16,18,20\}$, 
-	- The number of choices per variable $d\in\{2,4,8,16,32,64,128,256\}$, 
-	- The edge density $\rho\in\{0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9\}$,
+	- The number of variables $N\in(2,4,6,8,10,12,14,16,18,20)$, 
+	- The number of choices per variable $d\in(2,4,8,16,32,64,128,256)$, 
+	- The edge density $\rho\in(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9)$,
 	- The CFN coefficients are drawn from $\mathcal{U}(-10,10)$, $\mathcal{N}(0,10)$, $\mathrm{Exp}(1)$, and $\mathrm{Lap}(0,1)$, and
   - The number of CFNs per $(N,d,\rho,\text{distribution})$ combination is 5;
 - The [Toulbar2](https://github.com/toulbar2/toulbar2) (v1.2.1) input parameters used to find the optimal solutions to the above problems; and
