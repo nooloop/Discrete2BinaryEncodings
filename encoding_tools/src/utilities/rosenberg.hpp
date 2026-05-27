@@ -1,5 +1,5 @@
 #pragma once
-#include "types.hpp"
+#include "baseline/types.hpp"
 
 // Rosenberg quadratization: reduce a HUBO to QUBO by introducing auxiliary variables.
 // For each cubic+ monomial c * b_p b_q b_r..., pick a pair (p,q), introduce y_{pq},

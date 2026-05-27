@@ -1,6 +1,6 @@
 #pragma once
-#include "types.hpp"
-#include "cfn.hpp"
+#include "baseline/types.hpp"
+#include "baseline/cfn.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iomanip>
@@ -19,7 +19,6 @@ inline std::string csv_header() {
         "solution_space_size,"
         "k_approx,"
         "k_trunc,"
-        "epsilon_lagrange,"
         "temperature,"
         "weighted_ls,"
         "li_prioritization,"
@@ -39,9 +38,7 @@ inline std::string csv_header() {
         "coefficient_min_abs,"
         "coefficient_dynamic_range,"
         "offset,"
-        "lagrange_multiplier_max,"
-        "lagrange_multiplier_min,"
-        "lagrange_multiplier_mean,"
+        "lagrange_multiplier,"
         "rosenberg_penalty,"
         "l2_approximation_error,"
         "linf_approximation_error,"
@@ -90,7 +87,6 @@ inline std::string csv_row(const CFN& cfn, const EncodingParams& params,
 
     ss << params.k_approx << ",";
     ss << params.k_trunc << ",";
-    ss << params.epsilon_lagrange << ",";
     ss << params.temperature << ",";
     ss << (params.weighted_ls ? "true" : "false") << ",";
     ss << (params.li_prioritization ? "true" : "false") << ",";
@@ -113,16 +109,11 @@ inline std::string csv_row(const CFN& cfn, const EncodingParams& params,
     ss << stats.dynamic_range << ",";
     ss << res.poly.offset << ",";
 
-    // Lagrange multipliers
-    if (!res.lagrange_multipliers.empty()) {
-        ss << *std::max_element(res.lagrange_multipliers.begin(), res.lagrange_multipliers.end()) << ",";
-        ss << *std::min_element(res.lagrange_multipliers.begin(), res.lagrange_multipliers.end()) << ",";
-        double sum = 0;
-        for (double l : res.lagrange_multipliers) sum += l;
-        ss << sum / res.lagrange_multipliers.size() << ",";
-    } else {
-        ss << "NA,NA,NA,";
-    }
+    // Lagrange multiplier (global MOMC)
+    if (res.lagrange_multiplier > 0)
+        ss << res.lagrange_multiplier << ",";
+    else
+        ss << "NA,";
 
     ss << (res.rosenberg_penalty > 0 ? std::to_string(res.rosenberg_penalty) : "NA") << ",";
     ss << res.l2_error << ",";

@@ -1,13 +1,13 @@
-#include "types.hpp"
-#include "cfn.hpp"
-#include "lagrange.hpp"
-#include "assignment.hpp"
-#include "one_hot.hpp"
-#include "domain_wall.hpp"
-#include "exact_binary.hpp"
-#include "approximate_binary.hpp"
-#include "truncated_binary.hpp"
-#include "rosenberg.hpp"
+#include "baseline/types.hpp"
+#include "baseline/cfn.hpp"
+#include "utilities/lagrange.hpp"
+#include "utilities/assignment.hpp"
+#include "encodings/one_hot.hpp"
+#include "encodings/domain_wall.hpp"
+#include "encodings/exact_binary.hpp"
+#include "encodings/approximate_binary.hpp"
+#include "encodings/truncated_binary.hpp"
+#include "utilities/rosenberg.hpp"
 #include "output.hpp"
 
 #include <filesystem>
@@ -44,7 +44,6 @@ void print_usage(const char* prog) {
         << "  --quadratize          Apply Rosenberg quadratization   (EB/TB only)\n"
         << "  --k-approx N          Max AB interaction degree        (default: 2)\n"
         << "  --k-trunc N           Walsh truncation order            (default: 2)\n"
-        << "  --epsilon FLOAT       Lagrange multiplier margin       (default: 0.1)\n"
         << "  --temperature FLOAT   Boltzmann temperature            (default: 1.0)\n"
         << "  --nl-temperature FLOAT  NL refinement temperature      (default: 1.0)\n"
         << "  --nl-tether FLOAT     NL tethering weight              (default: 1.0)\n"
@@ -74,7 +73,6 @@ CLIArgs parse_args(int argc, char** argv) {
         else if (a == "--quadratize")    args.params.quadratize = true;
         else if (a == "--k-approx")      args.params.k_approx = std::stoi(next());
         else if (a == "--k-trunc")       args.params.k_trunc = std::stoi(next());
-        else if (a == "--epsilon")       args.params.epsilon_lagrange = std::stod(next());
         else if (a == "--temperature")   args.params.temperature = std::stod(next());
         else if (a == "--nl-temperature") args.params.nl_temperature = std::stod(next());
         else if (a == "--nl-tether")     args.params.nl_tether_weight = std::stod(next());

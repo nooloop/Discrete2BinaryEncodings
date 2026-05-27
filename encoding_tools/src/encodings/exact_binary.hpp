@@ -1,6 +1,6 @@
 #pragma once
-#include "cfn.hpp"
-#include "assignment.hpp"
+#include "baseline/cfn.hpp"
+#include "utilities/assignment.hpp"
 
 // Expand the indicator polynomial x_{i,c} for exact-binary encoding.
 // x_{i,c} = prod_{q=0}^{D-1} (b_q * r_q + (1-b_q)*(1-r_q))

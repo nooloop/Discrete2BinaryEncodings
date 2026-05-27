@@ -1,5 +1,5 @@
 #pragma once
-#include "types.hpp"
+#include "baseline/types.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <stdexcept>

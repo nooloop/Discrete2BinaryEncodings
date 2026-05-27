@@ -1,5 +1,5 @@
 #pragma once
-#include "cfn.hpp"
+#include "baseline/cfn.hpp"
 #include <Eigen/Dense>
 
 // Choice-to-bitstring assignment: for each variable, maps choice index to bitstring value.

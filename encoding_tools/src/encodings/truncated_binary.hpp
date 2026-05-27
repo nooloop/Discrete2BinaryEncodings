@@ -1,6 +1,6 @@
 #pragma once
-#include "cfn.hpp"
-#include "assignment.hpp"
+#include "baseline/cfn.hpp"
+#include "utilities/assignment.hpp"
 #include <cmath>
 
 #ifdef HAS_OPENMP

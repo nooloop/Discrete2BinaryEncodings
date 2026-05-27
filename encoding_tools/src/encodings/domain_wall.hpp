@@ -1,13 +1,12 @@
 #pragma once
-#include "cfn.hpp"
-#include "lagrange.hpp"
+#include "baseline/cfn.hpp"
+#include "utilities/lagrange.hpp"
 
-// Domain-wall indicator: x_{i,c} = b_{i,c-1} - b_{i,c}
-// with b_{i,-1}=1 and b_{i,|d|-1}=0.
+// Domain-wall indicator: x_{i,c} = b_{i,c-1} - b_{i,c} with b_{i,-1} = 1 and b_{i,|d|-1} = 0.
 // Returns a local polynomial in the DW qubits of variable i.
-// Local qubit indices: 0..|d|-2
+
 struct DWIndicator {
-    double constant = 0;                // from b_{i,-1}=1 boundary
+    double constant = 0;                         // from b_{i,-1}=1 boundary
     std::vector<std::pair<int, double>> linear;  // (local_qubit, coeff)
 
     static DWIndicator make(int choice, int cardinality) {
@@ -54,8 +53,9 @@ inline EncodingResult encode_domain_wall(const CFN& cfn, const EncodingParams& p
 
     Timer enc_timer;
 
-    // Unary costs using telescoping: sum_c C_{i;c} * x_{i,c}
-    // = C_{i;0} + sum_{q=0}^{|d|-2} (C_{i;q+1} - C_{i;q}) * b_{i,q}
+    // ---- Build H^(obj): the cost terms WITHOUT penalty ----
+
+    // Unary costs using telescoping: sum_c C_{i;c} * x_{i,c} = C_{i;0} + sum_{q=0}^{|d|-2} (C_{i;q+1} - C_{i;q}) * b_{i,q}
     for (int i = 0; i < N; i++) {
         int di = cfn.cardinalities[i];
         int qs = result.qubit_start[i];
@@ -70,7 +70,6 @@ inline EncodingResult encode_domain_wall(const CFN& cfn, const EncodingParams& p
     }
 
     // Pairwise costs: sum_{c_i,c_j} C_{i,j;c_i,c_j} * x_{i,c_i} * x_{j,c_j}
-    // Each product x_{i,c_i} * x_{j,c_j} expands into at most 4 terms
     for (auto& pt : cfn.pairwise_tables) {
         int vi = pt.scope[0], vj = pt.scope[1];
         int qi = result.qubit_start[vi], qj = result.qubit_start[vj];
@@ -84,7 +83,6 @@ inline EncodingResult encode_domain_wall(const CFN& cfn, const EncodingParams& p
 
                 DWIndicator ind_j = DWIndicator::make(cj, dj);
 
-                // Multiply: (k_i + sum a*b_p) * (k_j + sum a'*b_q)
                 // Constant * Constant
                 result.poly.add_constant(cost * ind_i.constant * ind_j.constant);
 
@@ -119,15 +117,15 @@ inline EncodingResult encode_domain_wall(const CFN& cfn, const EncodingParams& p
 
     result.time_encoding = enc_timer.elapsed();
 
-    // Lagrange multipliers
+    // ---- MOMC Lagrange multiplier (Appendix A.1.1) ----
+    // Compute global lambda = W_c / gamma from H^(obj), with gamma = 1
     Timer lag_timer;
-    auto lambdas = compute_momc_lambdas(cfn, params.epsilon_lagrange);
-    result.lagrange_multipliers = lambdas;
+    double lam = compute_momc_lambda(result.poly);
+    result.lagrange_multiplier = lam;
 
-    // Penalty: lambda_i * sum_{c=1}^{|d|-2} (b_{i,c} - b_{i,c}*b_{i,c-1})
+    // Penalty: lambda * sum_i sum_{c=1}^{|d|-2} (b_{i,c} - b_{i,c}*b_{i,c-1})
     // (c=0 term is zero because b_{i,-1}=1)
     for (int i = 0; i < N; i++) {
-        double lam = lambdas[i];
         int qs = result.qubit_start[i];
         int di = cfn.cardinalities[i];
 

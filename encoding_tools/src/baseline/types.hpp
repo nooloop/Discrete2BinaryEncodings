@@ -184,7 +184,6 @@ struct EncodingParams {
     bool quadratize = false;
     int k_approx = 2;
     int k_trunc = 2;
-    double epsilon_lagrange = 0.1;
     double temperature = 1.0;
     int num_threads = 1;
     double nl_temperature = 1.0;
@@ -213,7 +212,7 @@ struct EncodingResult {
     double time_output = 0;
 
     // Encoding-specific
-    std::vector<double> lagrange_multipliers;
+    double lagrange_multiplier = 0;
     double rosenberg_penalty = 0;
     double l2_error = 0;
     double linf_error = 0;

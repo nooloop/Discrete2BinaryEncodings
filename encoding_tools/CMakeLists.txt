@@ -44,3 +44,8 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(encode_cfn PRIVATE OpenMP::OpenMP_CXX)
     target_compile_definitions(encode_cfn PRIVATE HAS_OPENMP)
 endif()
+
+# Unit tests
+add_executable(tests tests/tests.cpp)
+target_include_directories(tests PRIVATE src)
+target_link_libraries(tests PRIVATE nlohmann_json::nlohmann_json Eigen3::Eigen)

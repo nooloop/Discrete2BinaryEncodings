@@ -1,6 +1,6 @@
 #pragma once
-#include "cfn.hpp"
-#include "assignment.hpp"
+#include "baseline/cfn.hpp"
+#include "utilities/assignment.hpp"
 #include <Eigen/Dense>
 #include <Eigen/SVD>
 #include <mutex>
@@ -14,6 +14,7 @@ namespace ab_detail {
 
 // Enumerate all monomials of a given degree range on num_bits bits.
 // Returns vectors of bit indices (sorted) for each monomial.
+
 inline std::vector<std::vector<int>> enumerate_monomials(int num_bits, int min_deg, int max_deg) {
     std::vector<std::vector<int>> result;
     for (int deg = min_deg; deg <= std::min(max_deg, num_bits); deg++) {
@@ -30,8 +31,7 @@ inline std::vector<std::vector<int>> enumerate_monomials(int num_bits, int min_d
     return result;
 }
 
-// Enumerate cross-register monomials: monomials that touch at least one bit
-// from each register in the scope.
+// Enumerate cross-register monomials: monomials that touch at least one bit from each register in the scope.
 // reg_offsets: local bit offset of each register
 // reg_sizes: number of bits per register
 inline std::vector<std::vector<int>> enumerate_cross_monomials(
