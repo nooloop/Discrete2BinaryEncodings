@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# ============================================================================
-# run_benchmark.sh  --  Parallel simulated annealing benchmark
-#
-# Runs solve_sa on every file in an input directory using GNU parallel.
-# Each invocation processes one file with all SA runs; one aggregate CSV
-# row is emitted per file.  The script collects them into an output CSV.
-#
-# Designed for 64-core Intel Ice Lake nodes:
-#   32 parallel tasks x 1 CPU each, leaving 32 cores dormant to avoid
-#   thermal throttling and resource contention.
-#
-# Dependencies: GNU parallel, solve_sa (in PATH or via --solver)
-# ============================================================================
 
 set -euo pipefail
 
@@ -42,8 +29,8 @@ Required:
   --output-csv FILE     Path for output CSV
 
 Optional:
-  --solver PATH         Path to solve_sa binary        (default: ./solve_sa)
-  --mode MODE           cfn | binary                   (default: binary)
+  --solver PATH         Path to solve_sa binary         (default: ./solve_sa)
+  --mode MODE           cfn | binary                    (default: binary)
   --schedule TYPE       geometric | linear              (default: geometric)
   --move-type TYPE      flip | shift | both (CFN only)  (default: flip)
   --T-start FLOAT       Starting temperature            (default: 10.0)
@@ -143,7 +130,6 @@ fi
 # ---- run in parallel ----
 # GNU parallel distributes files across $JOBS workers.
 # Each worker runs solve_sa on one file; output (one CSV row) goes to stdout.
-# We append all stdout to the output CSV.
 
 printf '%s\n' "${FILES[@]}" | \
     parallel -j "$JOBS" --bar \

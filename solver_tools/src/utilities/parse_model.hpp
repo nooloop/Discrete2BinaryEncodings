@@ -6,8 +6,6 @@
 
 // ============================================================================
 // Binary model (QUBO / HUBO / Ising) loaded from encoding_tools JSON.
-//
-// The solver uses single-bit flip with O(degree) delta evaluation.
 // ============================================================================
 
 struct BinaryModel {

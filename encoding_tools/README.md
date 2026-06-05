@@ -1,6 +1,6 @@
 # encoding_tools
 
-High-performance C++17 tool for converting pairwise-decomposable Cost Function Networks (CFNs) in Toulbar2 JSON format into QUBO/HUBO/Ising models under five binary-variable encodings. Outputs D-Wave-compatible JSON model files and a CSV of benchmarking metrics.
+C++17 tool for converting pairwise-decomposable Cost Function Networks (CFNs) in Toulbar2 JSON format into QUBO/HUBO/Ising models under five binary-variable encodings. Outputs D-Wave-compatible JSON model files and a CSV of benchmarking metrics.
 
 ## Encodings
 
@@ -49,16 +49,14 @@ Penalty strength: `M = 2 * max_{|S|>2} |c_S|`. Auxiliary variables are shared ac
 
 ### Lagrange multipliers
 
-One-hot and domain-wall use the MOMC (Maximum change in Objective function divided by Minimum Constraint function) method from Ayodele 2022. A single global Lagrange multiplier is computed as:
+One-hot and domain-wall use per-register MOMC (maximum-of-maximum-contribution) Lagrange multipliers:
 
 ```
-lambda = W_c / gamma
-
-W_c   = max_q  sum_{S containing q} |C_S|     (max single-flip objective change)
-gamma = min_{b: H^penalty(b) > 0} H^penalty(b) = 1   (for OH, DW, and KH)
+lambda_i = (1 + epsilon) * Delta_i
+Delta_i  = range(unary_i) + sum_j range(pairwise_{i,j})
 ```
 
-The numerator `W_c` is computed from the already-constructed objective polynomial H^(obj) (the encoded cost terms without the penalty). For each qubit `q`, the sum of absolute coefficients of all monomials containing `q` bounds the maximum objective change achievable by flipping `q`. The denominator `gamma = 1` is proven algebraically from the structure of the penalty for all three encodings.
+This avoids the dynamic-range inflation of a single global penalty constant.
 
 ## Building
 
@@ -97,6 +95,7 @@ Encoding options:
   --quadratize          Apply Rosenberg quadratization            (EB/TB only)
   --k-approx N          Max AB interaction degree                 (default: 2)
   --k-trunc N           Walsh truncation order                    (default: 2)
+  --epsilon FLOAT       Lagrange multiplier margin                (default: 0.1)
   --temperature FLOAT   Boltzmann temperature                     (default: 1.0)
   --nl-temperature FLOAT  NL refinement temperature               (default: 1.0)
   --nl-tether FLOAT     NL tethering weight                       (default: 1.0)
@@ -170,7 +169,7 @@ A single CSV file accumulates one row per encoded CFN with columns covering:
 - **Qubit counts**: logical, auxiliary, total
 - **Term statistics**: max interaction degree, mean weighted degree, counts by degree (linear/quadratic/cubic/higher), total nonzero terms
 - **Coefficient statistics**: max |coeff|, min |coeff|, dynamic range, offset
-- **Constraint information**: Lagrange multiplier (global MOMC), Rosenberg penalty strength
+- **Constraint information**: Lagrange multiplier max/min/mean, Rosenberg penalty strength
 - **Approximation quality**: L2 error, L-infinity error, spectral profile (TB only)
 - **Timing**: total, parse, choice ordering, bitstring assignment, Lagrange, encoding, quadratization, nonlinear refinement, output (all in seconds)
 - **Variable type**: BINARY or SPIN
