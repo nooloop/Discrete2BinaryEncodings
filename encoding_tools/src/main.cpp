@@ -25,6 +25,7 @@ struct CLIArgs {
     std::string csv_path;
     EncodingParams params;
     bool verbose = false;
+    bool jsonl = false;
 };
 
 void print_usage(const char* prog) {
@@ -33,6 +34,7 @@ void print_usage(const char* prog) {
         << "\nRequired:\n"
         << "  --input-dir DIR       Directory containing .cfn files\n"
         << "  --output-dir DIR      Directory for output JSON files\n"
+        << "  --jsonl               Write ONE combined <encoding>.jsonl (one model per line)\n"
         << "  --csv FILE            Path for metrics CSV\n"
         << "  --encoding NAME       one_hot|domain_wall|exact_binary|approximate_binary|truncated_binary\n"
         << "\nEncoding options:\n"
@@ -63,6 +65,7 @@ CLIArgs parse_args(int argc, char** argv) {
 
         if (a == "--input-dir")          args.input_dir = next();
         else if (a == "--output-dir")    args.output_dir = next();
+        else if (a == "--jsonl")         args.jsonl = true;
         else if (a == "--csv")           args.csv_path = next();
         else if (a == "--encoding")      args.params.encoding = next();
         else if (a == "--choice-ordering")   args.params.choice_ordering = next();
@@ -125,6 +128,19 @@ int main(int argc, char** argv) {
     }
     if (!csv_exists)
         csv << csv_header() << "\n";
+
+    // Optional combined output: one JSONL file total, one model object per line.
+    // Avoids creating one file per instance (and the archiving/crawl that needs).
+    std::ofstream models;
+    if (args.jsonl) {
+        std::string models_path = (fs::path(args.output_dir) /
+            (args.params.encoding + ".jsonl")).string();
+        models.open(models_path);
+        if (!models.is_open()) {
+            std::cerr << "Cannot open output file: " << models_path << "\n";
+            return 1;
+        }
+    }
 
     if (args.verbose)
         std::cerr << "Processing " << cfn_files.size() << " CFN files with encoding: "
@@ -189,12 +205,17 @@ int main(int argc, char** argv) {
             // Recompute total time including all steps
             result.time_total = file_timer.elapsed();
 
-            // Write output JSON
+            // Write output: one combined JSONL line (--jsonl) or a per-instance JSON.
             Timer out_timer;
             std::string basename = fs::path(cfn_path).stem().string();
-            std::string out_path = (fs::path(args.output_dir) /
-                (basename + "_" + args.params.encoding + ".json")).string();
-            write_model_json(out_path, result, cfn, args.params);
+            if (args.jsonl) {
+                models << build_model_json(result, cfn, args.params).dump() << "\n";
+                models.flush();
+            } else {
+                std::string out_path = (fs::path(args.output_dir) /
+                    (basename + "_" + args.params.encoding + ".json")).string();
+                write_model_json(out_path, result, cfn, args.params);
+            }
             result.time_output = out_timer.elapsed();
 
             // Write CSV row
@@ -204,7 +225,7 @@ int main(int argc, char** argv) {
             processed++;
             if (args.verbose && processed % 100 == 0)
                 std::cerr << "  [" << processed << "/" << cfn_files.size() << "] "
-                          << basename << " (" << result.time_total << "s)\n";
+                          << basename << " (" << result.time_total << "us)\n";
 
         } catch (const std::exception& e) {
             std::cerr << "Error processing " << cfn_path << ": " << e.what() << "\n";

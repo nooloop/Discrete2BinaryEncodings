@@ -234,7 +234,7 @@ public:
     Timer() : t0(Clock::now()) {}
     void reset() { t0 = Clock::now(); }
     double elapsed() const {
-        return std::chrono::duration<double>(Clock::now() - t0).count();
+        return std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
     }
 };
 

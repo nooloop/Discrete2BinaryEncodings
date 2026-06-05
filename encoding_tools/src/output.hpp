@@ -43,15 +43,15 @@ inline std::string csv_header() {
         "l2_approximation_error,"
         "linf_approximation_error,"
         "spectral_profile,"
-        "time_total_s,"
-        "time_parse_s,"
-        "time_choice_ordering_s,"
-        "time_bitstring_assignment_s,"
-        "time_lagrange_s,"
-        "time_encoding_s,"
-        "time_quadratization_s,"
-        "time_nonlinear_refinement_s,"
-        "time_output_s,"
+        "time_total_us,"
+        "time_parse_us,"
+        "time_choice_ordering_us,"
+        "time_bitstring_assignment_us,"
+        "time_lagrange_us,"
+        "time_encoding_us,"
+        "time_quadratization_us,"
+        "time_nonlinear_refinement_us,"
+        "time_output_us,"
         "variable_type";
 }
 
@@ -146,10 +146,9 @@ inline std::string csv_row(const CFN& cfn, const EncodingParams& params,
 }
 
 // Write QUBO/HUBO/Ising model as JSON
-inline void write_model_json(const std::string& path,
-                              const EncodingResult& res,
-                              const CFN& cfn,
-                              const EncodingParams& params) {
+inline nlohmann::json build_model_json(const EncodingResult& res,
+                                       const CFN& cfn,
+                                       const EncodingParams& params) {
     nlohmann::json j;
     j["encoding"] = params.encoding;
     j["variable_type"] = (res.poly.var_type == VarType::SPIN) ? "SPIN" : "BINARY";
@@ -181,8 +180,16 @@ inline void write_model_json(const std::string& path,
     }
     j["terms"] = terms;
 
+    return j;
+}
+
+// Backward-compatible per-instance writer (pretty JSON); used when --jsonl is off.
+inline void write_model_json(const std::string& path,
+                             const EncodingResult& res,
+                             const CFN& cfn,
+                             const EncodingParams& params) {
     std::ofstream ofs(path);
     if (!ofs.is_open())
         throw std::runtime_error("Cannot open output file: " + path);
-    ofs << j.dump(2);
+    ofs << build_model_json(res, cfn, params).dump(2);
 }
