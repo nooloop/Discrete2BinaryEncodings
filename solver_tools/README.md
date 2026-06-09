@@ -244,9 +244,30 @@ solve_qa --input encoded/tb2/example_truncated_binary.json \
   --verbose
 ```
 
-### QA benchmark (run_benchmark_qa.sh)
+### QA benchmark (Slurm + disBatch)
 
-`scripts/run_benchmark_qa.sh` automates D-Wave QA execution across all encoded JSON files. Default `--jobs 1` since the D-Wave QPU is a shared resource (parallel jobs are queued). Increase `--jobs` to overlap embedding computation with QPU wait times.
+`scripts/slurm_qa_benchmark.slurm` is a Slurm batch script that takes an input directory of `.jsonl` files and an output directory. It splits the JSONL on node-local scratch, generates a disBatch task file, and distributes problems across 32 workers.
+
+```bash
+sbatch scripts/slurm_qa_benchmark.slurm <INPUT_DIR> <OUTPUT_DIR>
+
+# Examples:
+sbatch scripts/slurm_qa_benchmark.slurm \
+    /mnt/home/user/ceph/.../encodings/truncated_binary/trunc_2/naive \
+    /mnt/home/user/ceph/.../output/encodings/truncated_binary/trunc_2/naive
+
+sbatch scripts/slurm_qa_benchmark.slurm \
+    /mnt/home/user/ceph/.../encodings/one_hot \
+    /mnt/home/user/ceph/.../output/encodings/one_hot
+```
+
+**I/O design**: all per-problem files (split JSON, CSV rows, Python scripts, D-Wave results) accumulate entirely on node-local `$TMPDIR`. After all tasks complete, the finished CSV is copied to ceph in a single operation. Zero ceph I/O during execution.
+
+**Restartable**: resubmitting the same `sbatch` command copies any existing output CSV back to scratch and skips problems already present in it.
+
+### QA benchmark (GNU parallel)
+
+`scripts/run_benchmark_qa.sh` provides a simpler alternative using GNU parallel for environments without disBatch.
 
 ```bash
 ./scripts/run_benchmark_qa.sh \
@@ -382,6 +403,8 @@ solver_tools/
 ├── scripts/
 │   ├── run_benchmark.sh              # GNU parallel SA benchmark driver
 │   ├── run_benchmark_qa.sh           # GNU parallel QA benchmark driver
+│   ├── slurm_qa_benchmark.slurm          # Slurm + disBatch QA benchmark (any encoding)
+│   ├── run_qa_one.sh                 # disBatch per-problem wrapper (scratch isolation)
 │   └── dwave_submit_template.py      # Reference copy of the D-Wave submission template
 └── tests/
     ├── tests.cpp                     # Unit tests (all solver modes and encodings)

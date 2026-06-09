@@ -317,6 +317,7 @@ inline QAResult run_qa_binary(
     }
 
     std::string cmd = params.python_cmd + " " + script_path;
+    if (!params.verbose) cmd += " 2>/dev/null";
     int ret = std::system(cmd.c_str());
     if (ret != 0) {
         std::remove(script_path.c_str());

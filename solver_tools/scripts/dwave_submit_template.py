@@ -84,20 +84,38 @@ def main():
 
     # === Find embedding ===
     t_embed = time.time()
+
+    # Use edgelists for find_embedding (adjacency dicts cause
+    # 'int not iterable' in some minorminer/Ocean SDK versions).
     source_edgelist = list(bqm.quadratic.keys())
     target_edgelist = sampler.edgelist
-
-    # Build target adjacency dict (guaranteed set values for embed_bqm)
-    target_adj = {q: set() for q in sampler.nodelist}
-    for u, v in target_edgelist:
-        target_adj[u].add(v)
-        target_adj[v].add(u)
 
     embedding = minorminer.find_embedding(source_edgelist, target_edgelist)
     if not embedding:
         print("Error: Could not find embedding for this problem on the "
               "selected solver.", file=sys.stderr)
         sys.exit(1)
+
+    # Isolated variables (only linear terms, no quadratic) are not in
+    # the source edgelist, so minorminer skips them.  Assign each to
+    # an unused physical qubit so unembed_sampleset doesn't KeyError.
+    used_physical = set()
+    for chain in embedding.values():
+        used_physical.update(chain)
+    for v in bqm.variables:
+        if v not in embedding:
+            for pq in sampler.nodelist:
+                if pq not in used_physical:
+                    embedding[v] = [pq]
+                    used_physical.add(pq)
+                    print(f"  Isolated variable {v} -> physical qubit {pq}",
+                          file=sys.stderr)
+                    break
+            else:
+                print(f"Error: no free physical qubit for isolated variable {v}",
+                      file=sys.stderr)
+                sys.exit(1)
+
     embedding_time_s = time.time() - t_embed
 
     total_phys = sum(len(chain) for chain in embedding.values())
@@ -105,6 +123,14 @@ def main():
     print(f"Embedding found in {embedding_time_s:.3f}s: "
           f"{total_phys} physical qubits, max chain length {max_chain}",
           file=sys.stderr)
+
+    # Build target adjacency for embed_bqm (dict with set values)
+    target_adj = {}
+    for u, v in target_edgelist:
+        target_adj.setdefault(u, set()).add(v)
+        target_adj.setdefault(v, set()).add(u)
+    for q in sampler.nodelist:
+        target_adj.setdefault(q, set())
 
     # === Compute chain strength (uniform torque compensation) ===
     chain_strength = uniform_torque_compensation(bqm, embedding)
