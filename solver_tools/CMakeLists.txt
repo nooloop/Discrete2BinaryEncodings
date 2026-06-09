@@ -30,7 +30,17 @@ add_executable(solve_sa src/main.cpp)
 target_include_directories(solve_sa PRIVATE src)
 target_link_libraries(solve_sa PRIVATE nlohmann_json::nlohmann_json)
 
-# Unit tests
+# D-Wave quantum annealing solver
+add_executable(solve_qa src/main_qa.cpp)
+target_include_directories(solve_qa PRIVATE src)
+target_link_libraries(solve_qa PRIVATE nlohmann_json::nlohmann_json)
+
+# Unit tests (SA)
 add_executable(tests tests/tests.cpp)
 target_include_directories(tests PRIVATE src)
 target_link_libraries(tests PRIVATE nlohmann_json::nlohmann_json)
+
+# Unit + integration tests (QA)
+add_executable(tests_qa tests/tests_qa.cpp)
+target_include_directories(tests_qa PRIVATE src)
+target_link_libraries(tests_qa PRIVATE nlohmann_json::nlohmann_json)

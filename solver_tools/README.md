@@ -1,13 +1,14 @@
 # solver_tools
 
-High-performance C++17 simulated annealing solver for Cost Function Networks (CFNs) and their binary-encoded counterparts (QUBO/HUBO/Ising models produced by `encoding_tools`). Outputs one CSV row per problem instance with aggregate statistics, best solution, and per-run energies. Designed for large-scale benchmarking via GNU parallel on multi-core nodes.
+High-performance C++17 solvers for Cost Function Networks (CFNs) and their binary-encoded counterparts (QUBO/HUBO/Ising models produced by `encoding_tools`). Includes simulated annealing (`solve_sa`) and D-Wave quantum annealing (`solve_qa`) with inhomogeneous transverse-field driving. Outputs one CSV row per problem instance with aggregate statistics, best solution, and per-run energies. Designed for large-scale benchmarking via GNU parallel on multi-core nodes.
 
 ## Solver modes
 
-| Mode | Input | Variables | Move type | Delta cost |
-|---|---|---|---|---|
-| **CFN** | Toulbar2 `.cfn` JSON | Integer (domain d_i) | flip, shift, both | O(degree of variable) |
-| **Binary** | `encoding_tools` `.json` | BINARY {0,1} or SPIN {-1,+1} | single-bit flip | O(degree of qubit) |
+| Mode | Binary | Input | Variables | Move type | Delta cost |
+|---|---|---|---|---|---|
+| **CFN** | `solve_sa` | Toulbar2 `.cfn` JSON | Integer (domain d_i) | flip, shift, both | O(degree of variable) |
+| **Binary SA** | `solve_sa` | `encoding_tools` `.json` | BINARY {0,1} or SPIN {-1,+1} | single-bit flip | O(degree of qubit) |
+| **D-Wave QA** | `solve_qa` | `encoding_tools` `.json` (QUBO/Ising only) | BINARY {0,1} or SPIN {-1,+1} | quantum anneal | N/A |
 
 ### CFN mode
 
@@ -34,6 +35,37 @@ SPIN {-1,+1}:   dE = -2 * s_q    * sum_{S containing q} C_S * prod_{q' in S\{q}}
 ```
 
 The best state encountered during each run is tracked and decoded back to CFN choices for the output.
+
+### D-Wave QA mode
+
+Submits encoded QUBO/Ising models to a D-Wave quantum annealer via the Ocean SDK. Only degree-2 models are supported (use `--quadratize` in `encoding_tools` for HUBOs). The workflow is:
+
+1. **Effective field computation** (C++, O(N^2)): For each logical qubit, the mean effective field is computed using the O(N_i) recurrence from Adame et al. (2020):
+
+   For SPIN {-1,+1}:
+   ```
+   f = |h_i|
+   for each coupling J: f = (|f + J| + |f - J|) / 2
+   eff_field = f
+   ```
+   For BINARY {0,1}:
+   ```
+   T = sum of couplings to qubit i
+   f = |2*h_i + T|
+   for each coupling J: f = (|f + J| + |f - J|) / 2
+   eff_field = f / 2
+   ```
+
+2. **Anneal offset computation**: Effective fields are normalized to [0,1] and converted to per-qubit anneal offsets:
+   ```
+   r_i = |F_i| / max_k |F_k|
+   delta_i = |delta_max| * (1 - 2 * r_i)
+   ```
+   Strongly-coupled qubits (large r) are delayed; weakly-coupled qubits are advanced.
+
+3. **D-Wave submission** (Python): A generated Python script reads the encoded model JSON, finds a minor embedding, maps logical offsets to physical qubits, and submits with `uniform_torque_compensation` chain strength.
+
+4. **Result decoding** (C++): D-Wave bitstrings are decoded to CFN choices and evaluated under the original CFN. Reports both the best encoded energy and the best native CFN energy.
 
 ### Solution decoding
 
@@ -87,7 +119,12 @@ cmake -B build -G "Visual Studio 17 2022"
 cmake --build build --config Release
 ```
 
-The resulting binaries are `build/Release/solve_sa` and `build/Release/tests` (or `build/solve_sa` and `build/tests` on single-config generators).
+The resulting binaries are `build/Release/solve_sa`, `build/Release/solve_qa`, and `build/Release/tests` (or `build/solve_sa`, `build/solve_qa`, and `build/tests` on single-config generators).
+
+`solve_qa` additionally requires Python 3 with `dwave-ocean-sdk` at runtime:
+```bash
+pip install dwave-ocean-sdk
+```
 
 ## Usage
 
@@ -146,9 +183,55 @@ Print only the CSV header:
 solve_sa --header
 ```
 
-## Benchmark script
+### D-Wave quantum annealing (solve_qa)
 
-`scripts/run_benchmark.sh` automates parallel execution across all files in a directory using GNU parallel. Designed for 64-core Intel Ice Lake nodes with 32 parallel tasks (leaving 32 cores dormant to avoid thermal throttling).
+```
+solve_qa [options]
+
+Required:
+  --input FILE            Path to encoded .json model (QUBO/Ising only)
+  --cfn-dir DIR           Directory containing source .cfn files
+  --solver NAME           D-Wave solver name
+
+D-Wave parameters:
+  --annealing-time FLOAT  Annealing time in microseconds     (default: 20)
+  --num-reads N           Number of reads (shots)            (default: 1000)
+
+Inhomogeneous driving:
+  --delta-max FLOAT       Max anneal offset magnitude        (default: 0.1)
+  --no-inhomogeneous      Disable inhomogeneous driving
+
+Optional:
+  --ground-truth E        Known optimum for success counting
+  --tolerance FLOAT       Tolerance for ground truth         (default: 1e-6)
+  --python CMD            Python interpreter                 (default: python3)
+  --header                Print CSV header and exit
+  --verbose               Print progress to stderr
+```
+
+Each invocation loads one encoded model, computes inhomogeneous anneal offsets (C++), generates and executes a Python D-Wave submission script, then decodes D-Wave bitstrings back to CFN solutions. The source CFN is located automatically via the model's `source_cfn` field in `--cfn-dir`.
+
+#### QA examples
+
+Submit a one-hot QUBO to D-Wave:
+```bash
+solve_qa --input encoded/oh/example_one_hot.json \
+  --cfn-dir cfns/ --solver Advantage_system6.4 \
+  --num-reads 1000 --annealing-time 20 --verbose
+```
+
+Submit a truncated-binary Ising model without inhomogeneous driving:
+```bash
+solve_qa --input encoded/tb2/example_truncated_binary.json \
+  --cfn-dir cfns/ --solver Advantage_system6.4 \
+  --no-inhomogeneous --num-reads 500
+```
+
+## Benchmark scripts
+
+### SA benchmark (run_benchmark.sh)
+
+`scripts/run_benchmark.sh` automates parallel SA execution across all files in a directory using GNU parallel. Designed for 64-core Intel Ice Lake nodes with 32 parallel tasks.
 
 ```bash
 ./scripts/run_benchmark.sh \
@@ -161,33 +244,24 @@ solve_sa --header
   --verbose
 ```
 
+### QA benchmark (run_benchmark_qa.sh)
+
+`scripts/run_benchmark_qa.sh` automates D-Wave QA execution across all encoded JSON files. Default `--jobs 1` since the D-Wave QPU is a shared resource (parallel jobs are queued). Increase `--jobs` to overlap embedding computation with QPU wait times.
+
+```bash
+./scripts/run_benchmark_qa.sh \
+  --input-dir encoded/one_hot/ \
+  --output-csv results/oh_qa_results.csv \
+  --cfn-dir cfns/ \
+  --solver-name Advantage_system6.4 \
+  --num-reads 1000 \
+  --annealing-time 20 \
+  --verbose
 ```
-run_benchmark.sh [options]
-
-Required:
-  --input-dir DIR       Directory containing .cfn or .json files
-  --output-csv FILE     Path for output CSV
-
-Optional:
-  --solver PATH         Path to solve_sa binary        (default: ./solve_sa)
-  --mode MODE           cfn | binary                   (default: binary)
-  --schedule TYPE       geometric | linear              (default: geometric)
-  --move-type TYPE      flip | shift | both (CFN only)  (default: flip)
-  --T-start FLOAT       Starting temperature            (default: 10.0)
-  --T-end FLOAT         Final temperature               (default: 0.01)
-  --num-runs N          Runs per problem                (default: 100)
-  --steps-multiplier M  steps = M * N * D               (default: 100)
-  --num-steps N         Override step count (ignores multiplier)
-  --seed N              Base RNG seed                   (default: 42)
-  --jobs N              Parallel jobs                   (default: 32)
-  --ground-truth E      Known optimum for success count
-  --tolerance FLOAT     Tolerance for ground truth      (default: 1e-6)
-  --verbose             Print progress
-```
-
-The script writes the CSV header first, then dispatches one `solve_sa` invocation per file. Each worker appends its single-line CSV output to the result file.
 
 ## Output format
+
+### SA CSV (solve_sa)
 
 A single CSV file with one row per problem instance. Columns:
 
@@ -199,6 +273,17 @@ A single CSV file with one row per problem instance. Columns:
 - **Raw data**: `per_run_energies` (all best energies as `[E0,E1,...,ER]`)
 
 In CFN mode, `best_solution` contains integer variable assignments directly. In binary mode, the best binary state is decoded to CFN choices using the encoding's decoding rule. The `num_optimal` column counts how many runs found the known ground truth (requires `--ground-truth`); it is `NA` if no ground truth is provided.
+
+### QA CSV (solve_qa)
+
+The QA CSV contains all 26 SA-compatible columns (with `solver_mode=dwave`, SA-specific fields set to `NA`/0) plus additional D-Wave columns:
+
+- **D-Wave configuration**: `solver_name`, `annealing_time_us`, `delta_max`
+- **D-Wave timing**: `inhomog_setup_time_s` (effective field computation), `embedding_time_s`, `qpu_access_time_us`, `qpu_sampling_time_us`, `qpu_programming_time_us`
+- **CFN evaluation**: `best_cfn_energy` (best energy under original CFN among feasible decoded solutions), `num_feasible` (number of D-Wave samples that decode to valid CFN solutions), `num_best_cfn` (number of feasible samples achieving best CFN energy)
+- **Embedding statistics**: `emb_num_physical_qubits`, `emb_chain_length_avg`, `emb_chain_length_median`, `emb_chain_length_var`, `emb_chain_breaks_avg`, `emb_chain_breaks_median`, `emb_chain_breaks_var`
+
+Chain length statistics are computed over the set of logical-to-physical chains in the embedding (one chain per logical variable). Chain break statistics are computed over all D-Wave samples (expanded by `num_occurrences`): for each sample, a chain break is counted when not all physical qubits in a chain agree.
 
 ## Input formats
 
@@ -279,18 +364,25 @@ solver_tools/
 ├── CMakeLists.txt
 ├── README.md
 ├── src/
-│   ├── main.cpp                      # CLI entry point, argument parsing, run orchestration
+│   ├── main.cpp                      # SA CLI entry point (solve_sa)
+│   ├── main_qa.cpp                   # QA CLI entry point (solve_qa)
 │   ├── baseline/
 │   │   ├── sa_types.hpp              # SATimer, temperature schedules, SAParams, RunResult, AggregateResult
-│   │   └── output.hpp                # CSV header and row formatting
+│   │   ├── qa_types.hpp              # QAParams, DWaveSample, DWaveTiming, DWaveResults, QAResult
+│   │   ├── output.hpp                # SA CSV header and row formatting
+│   │   └── output_qa.hpp             # QA CSV header and row formatting
 │   ├── solvers/
 │   │   ├── sa_cfn.hpp                # CFN simulated annealing (flip/shift/both moves)
-│   │   └── sa_binary.hpp             # Binary SA (single-bit flip, delta evaluation)
+│   │   ├── sa_binary.hpp             # Binary SA (single-bit flip, delta evaluation)
+│   │   └── qa_binary.hpp             # D-Wave QA (effective fields, offsets, submission, decoding)
 │   └── utilities/
 │       ├── parse_cfn.hpp             # CFN parser (Toulbar2 JSON), CFNModel, delta_energy
-│       └── parse_model.hpp           # Binary model parser, BinaryModel, delta_energy, decode_to_cfn
+│       ├── parse_model.hpp           # Binary model parser, BinaryModel, delta_energy, decode_to_cfn
+│       └── dwave_template.hpp        # Embedded Python submission script template
 ├── scripts/
-│   └── run_benchmark.sh              # GNU parallel benchmark driver
+│   ├── run_benchmark.sh              # GNU parallel SA benchmark driver
+│   ├── run_benchmark_qa.sh           # GNU parallel QA benchmark driver
+│   └── dwave_submit_template.py      # Reference copy of the D-Wave submission template
 └── tests/
     ├── tests.cpp                     # Unit tests (all solver modes and encodings)
     ├── test_2x4.cfn                  # Source CFN for test model generation
@@ -310,4 +402,5 @@ solver_tools/
 - **C++17 compiler** (GCC 7+, Clang 5+, MSVC 2017+)
 - **CMake 3.14+**
 - **[nlohmann/json](https://github.com/nlohmann/json) 3.11.3** (fetched automatically)
-- **GNU parallel** (for benchmark script only)
+- **GNU parallel** (for benchmark scripts only)
+- **Python 3** with **[dwave-ocean-sdk](https://docs.ocean.dwavesys.com/)** (for `solve_qa` only)
