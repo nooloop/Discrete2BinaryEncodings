@@ -1,75 +1,66 @@
 # solver_tools
 
-High-performance C++17 solvers for Cost Function Networks (CFNs) and their binary-encoded counterparts (QUBO/HUBO/Ising models produced by `encoding_tools`). Includes simulated annealing (`solve_sa`) and D-Wave quantum annealing (`solve_qa`) with inhomogeneous transverse-field driving. Outputs one CSV row per problem instance with aggregate statistics, best solution, and per-run energies. Designed for large-scale benchmarking via GNU parallel on multi-core nodes.
+High-performance C++17 solvers for Cost Function Networks (CFNs) and their binary-encoded counterparts (QUBO/HUBO/Ising models produced by `encoding_tools`). Includes simulated annealing (`solve_sa`) and D-Wave quantum annealing (`solve_qa`) with inhomogeneous transverse-field driving. Outputs one CSV row per problem instance with aggregate statistics, best solution, and per-run energies. Designed for large-scale benchmarking via GNU parallel and disBatch on multi-core Slurm clusters.
 
-## Solver modes
+## Table of Contents
 
-| Mode | Binary | Input | Variables | Move type | Delta cost |
-|---|---|---|---|---|---|
-| **CFN** | `solve_sa` | Toulbar2 `.cfn` JSON | Integer (domain d_i) | flip, shift, both | O(degree of variable) |
-| **Binary SA** | `solve_sa` | `encoding_tools` `.json` | BINARY {0,1} or SPIN {-1,+1} | single-bit flip | O(degree of qubit) |
-| **D-Wave QA** | `solve_qa` | `encoding_tools` `.json` (QUBO/Ising only) | BINARY {0,1} or SPIN {-1,+1} | quantum anneal | N/A |
+- [Contents](#contents)
+- [Usage](#usage)
+  - [Building](#building)
+  - [Simulated annealing (solve_sa)](#simulated-annealing-solve_sa)
+  - [D-Wave quantum annealing (solve_qa)](#d-wave-quantum-annealing-solve_qa)
+  - [Batch benchmarking](#batch-benchmarking)
+  - [Input formats](#input-formats)
+  - [Output formats](#output-formats)
+  - [Tests](#tests)
+- [Dependencies](#dependencies)
 
-### CFN mode
-
-Operates directly on the native Cost Function Network with integer-valued variables. Each SA step selects a random variable and proposes a new choice according to the move type:
-
-- **flip**: uniform random choice different from the current one
-- **shift**: move to an adjacent choice (x +/- 1), with boundary reflection
-- **both**: 50/50 random selection between flip and shift at each step
-
-Delta evaluation computes the energy change in O(degree) by updating only the unary cost and adjacent pairwise tables:
+## Contents
 
 ```
-dE = unary[i][new] - unary[i][old]
-   + sum_{(i,j) in edges} [ pw(new, x_j) - pw(old, x_j) ]
+solver_tools/
+├── CMakeLists.txt
+├── README.md
+├── src/
+│   ├── main.cpp                      # SA CLI entry point (solve_sa)
+│   ├── main_qa.cpp                   # QA CLI entry point (solve_qa)
+│   ├── baseline/
+│   │   ├── sa_types.hpp              # SATimer, temperature schedules, SAParams, RunResult, AggregateResult
+│   │   ├── qa_types.hpp              # QAParams, DWaveSample, DWaveTiming, DWaveResults, QAResult
+│   │   ├── output.hpp                # SA CSV header and row formatting
+│   │   └── output_qa.hpp             # QA CSV header and row formatting
+│   ├── solvers/
+│   │   ├── sa_cfn.hpp                # CFN simulated annealing (flip/shift/both moves)
+│   │   ├── sa_binary.hpp             # Binary SA (single-bit flip, delta evaluation)
+│   │   └── qa_binary.hpp             # D-Wave QA (effective fields, offsets, submission, decoding)
+│   └── utilities/
+│       ├── parse_cfn.hpp             # CFN parser (Toulbar2 JSON), CFNModel, delta_energy
+│       ├── parse_model.hpp           # Binary model parser, BinaryModel, delta_energy, decode_to_cfn
+│       └── dwave_template.hpp        # Embedded Python D-Wave submission script template
+├── scripts/
+│   ├── run_benchmark.sh              # GNU parallel SA benchmark driver
+│   ├── run_benchmark_qa.sh           # GNU parallel QA benchmark driver
+│   ├── slurm_qa_benchmark.slurm     # Slurm + disBatch QA benchmark (any encoding)
+│   ├── run_qa_one.sh                 # disBatch per-problem wrapper (scratch isolation)
+│   └── dwave_submit_template.py      # Reference copy of the D-Wave submission template
+└── tests/
+    ├── tests.cpp                     # SA unit tests (all solver modes and encodings)
+    ├── tests_qa.cpp                  # QA unit + D-Wave integration tests (all encodings)
+    ├── test_2x4.cfn                  # Source CFN for test model generation
+    └── test_models/                  # Pre-generated encoded models for tests
 ```
 
-### Binary mode
+### Solver modes
 
-Operates on encoded binary models (QUBO, HUBO, or Ising) produced by `encoding_tools`. Each SA step flips a single qubit and evaluates the energy change in O(degree) using a precomputed adjacency structure:
-
-```
-BINARY {0,1}:   dE = (1 - 2*b_q) * sum_{S containing q} C_S * prod_{q' in S\{q}} b_{q'}
-SPIN {-1,+1}:   dE = -2 * s_q    * sum_{S containing q} C_S * prod_{q' in S\{q}} s_{q'}
-```
-
-The best state encountered during each run is tracked and decoded back to CFN choices for the output.
-
-### D-Wave QA mode
-
-Submits encoded QUBO/Ising models to a D-Wave quantum annealer via the Ocean SDK. Only degree-2 models are supported (use `--quadratize` in `encoding_tools` for HUBOs). The workflow is:
-
-1. **Effective field computation** (C++, O(N^2)): For each logical qubit, the mean effective field is computed using the O(N_i) recurrence from Adame et al. (2020):
-
-   For SPIN {-1,+1}:
-   ```
-   f = |h_i|
-   for each coupling J: f = (|f + J| + |f - J|) / 2
-   eff_field = f
-   ```
-   For BINARY {0,1}:
-   ```
-   T = sum of couplings to qubit i
-   f = |2*h_i + T|
-   for each coupling J: f = (|f + J| + |f - J|) / 2
-   eff_field = f / 2
-   ```
-
-2. **Anneal offset computation**: Effective fields are normalized to [0,1] and converted to per-qubit anneal offsets:
-   ```
-   r_i = |F_i| / max_k |F_k|
-   delta_i = |delta_max| * (1 - 2 * r_i)
-   ```
-   Strongly-coupled qubits (large r) are delayed; weakly-coupled qubits are advanced.
-
-3. **D-Wave submission** (Python): A generated Python script reads the encoded model JSON, finds a minor embedding, maps logical offsets to physical qubits, and submits with `uniform_torque_compensation` chain strength.
-
-4. **Result decoding** (C++): D-Wave bitstrings are decoded to CFN choices and evaluated under the original CFN. Reports both the best encoded energy and the best native CFN energy.
+| Mode | Binary | Input | Variables | Move type |
+|---|---|---|---|---|
+| **CFN** | `solve_sa` | Toulbar2 `.cfn` JSON | Integer (domain d_i) | flip, shift, both |
+| **Binary SA** | `solve_sa` | `encoding_tools` `.json` | BINARY {0,1} or SPIN {-1,+1} | single-bit flip |
+| **D-Wave QA** | `solve_qa` | `encoding_tools` `.json` (QUBO/Ising) | BINARY {0,1} or SPIN {-1,+1} | quantum anneal |
 
 ### Solution decoding
 
-Binary solutions are decoded to CFN variable assignments using the qubit-to-variable mapping stored in the model's `qubit_map`:
+Binary solutions are decoded to CFN variable assignments using the model's `qubit_map`:
 
 | Encoding | Decoding rule |
 |---|---|
@@ -79,54 +70,29 @@ Binary solutions are decoded to CFN variable assignments using the qubit-to-vari
 
 For SPIN models, bits are converted via `b = (1 - s) / 2` before reading the register.
 
-### Temperature schedules
+### Inhomogeneous transverse-field driving (D-Wave)
 
-Two cooling schedules are available:
+`solve_qa` computes per-qubit effective fields using the O(N_i) recurrence from Adame et al. (2020), normalizes them to anneal offsets, and maps them through the minor embedding to physical qubits. Strongly-coupled qubits are delayed; weakly-coupled qubits are advanced.
 
-- **geometric** (default): `T(t) = T_start * (T_end / T_start)^(t / (steps - 1))`
-- **linear**: `T(t) = T_start + (T_end - T_start) * t / (steps - 1)`
+## Usage
 
-### Step count
+### Building
 
-The total number of SA steps per run is determined by:
-
-```
-steps = steps_multiplier * N * D
-```
-
-where `N` is the number of source CFN variables and `D` is the maximum cardinality. In binary mode, `N` and `D` are extracted from the model's `qubit_map` using encoding-specific logic:
-
-| Encoding | Cardinality from bits |
-|---|---|
-| one_hot | d = max bits per variable |
-| domain_wall | d = max bits per variable + 1 |
-| \*_binary | d = 2^(max bits per variable) |
-
-The step count can also be set explicitly with `--num-steps`, which overrides the multiplier.
-
-## Building
-
-Requires CMake 3.14+ and a C++17 compiler. The only dependency (nlohmann/json 3.11.3) is fetched automatically via CMake FetchContent.
+Requires CMake 3.14+ and a C++17 compiler. The only C++ dependency (nlohmann/json 3.11.3) is fetched automatically.
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-On Windows with Visual Studio Build Tools:
-```powershell
-cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release
-```
-
-The resulting binaries are `build/Release/solve_sa`, `build/Release/solve_qa`, and `build/Release/tests` (or `build/solve_sa`, `build/solve_qa`, and `build/tests` on single-config generators).
+Produces `solve_sa`, `solve_qa`, `tests`, and `tests_qa`.
 
 `solve_qa` additionally requires Python 3 with `dwave-ocean-sdk` at runtime:
 ```bash
 pip install dwave-ocean-sdk
 ```
 
-## Usage
+### Simulated annealing (solve_sa)
 
 ```
 solve_sa [options]
@@ -156,30 +122,18 @@ Optional:
   --verbose               Print progress to stderr
 ```
 
-Each invocation processes one input file, runs all SA runs sequentially, and emits a single CSV row to stdout. This design enables efficient parallelization with GNU parallel.
+Each invocation processes one file, runs all SA trajectories, and emits a single CSV row to stdout.
 
-### Examples
+#### SA examples
 
-Run SA on a native CFN with shift moves:
 ```bash
-solve_sa --mode cfn --input problems/CFN_N10_D4_rho0.3_uniform_1.cfn \
-  --move-type shift --num-runs 100 --steps-multiplier 200 --verbose
-```
+# Native CFN with shift moves
+solve_sa --mode cfn --input problem.cfn --move-type shift --num-runs 100
 
-Run SA on a one-hot encoded QUBO:
-```bash
-solve_sa --mode binary --input encoded/one_hot/CFN_N10_D4_rho0.3_uniform_1_one_hot.json \
-  --T-start 5.0 --T-end 0.001 --num-runs 50 --seed 123
-```
+# One-hot encoded QUBO
+solve_sa --mode binary --input problem_one_hot.json --num-runs 50
 
-Run SA on a truncated-binary Ising model with known ground truth:
-```bash
-solve_sa --mode binary --input encoded/tb3/CFN_N10_D4_rho0.3_uniform_1_truncated_binary.json \
-  --ground-truth 42.5 --num-runs 100
-```
-
-Print only the CSV header:
-```bash
+# Print CSV header only
 solve_sa --header
 ```
 
@@ -209,127 +163,58 @@ Optional:
   --verbose               Print progress to stderr
 ```
 
-Each invocation loads one encoded model, computes inhomogeneous anneal offsets (C++), generates and executes a Python D-Wave submission script, then decodes D-Wave bitstrings back to CFN solutions. The source CFN is located automatically via the model's `source_cfn` field in `--cfn-dir`.
+Each invocation computes anneal offsets (C++), submits to D-Wave (Python), decodes bitstrings to CFN choices, evaluates under the original CFN, and emits a CSV row. The source CFN is located via the model's `source_cfn` field in `--cfn-dir`.
 
 #### QA examples
 
-Submit a one-hot QUBO to D-Wave:
 ```bash
-solve_qa --input encoded/oh/example_one_hot.json \
-  --cfn-dir cfns/ --solver Advantage_system6.4 \
-  --num-reads 1000 --annealing-time 20 --verbose
+# Submit one-hot QUBO to D-Wave
+solve_qa --input problem_one_hot.json --cfn-dir cfns/ \
+    --solver Advantage2_system1 --num-reads 1000
+
+# Truncated-binary without inhomogeneous driving
+solve_qa --input problem_truncated_binary.json --cfn-dir cfns/ \
+    --solver Advantage2_system1 --no-inhomogeneous
 ```
 
-Submit a truncated-binary Ising model without inhomogeneous driving:
-```bash
-solve_qa --input encoded/tb2/example_truncated_binary.json \
-  --cfn-dir cfns/ --solver Advantage_system6.4 \
-  --no-inhomogeneous --num-reads 500
-```
+### Batch benchmarking
 
-## Benchmark scripts
-
-### SA benchmark (run_benchmark.sh)
-
-`scripts/run_benchmark.sh` automates parallel SA execution across all files in a directory using GNU parallel. Designed for 64-core Intel Ice Lake nodes with 32 parallel tasks.
-
+**SA (GNU parallel):**
 ```bash
 ./scripts/run_benchmark.sh \
-  --input-dir encoded/one_hot/ \
-  --output-csv results/oh_results.csv \
-  --mode binary \
-  --num-runs 100 \
-  --steps-multiplier 200 \
-  --jobs 32 \
-  --verbose
+    --input-dir encoded/one_hot/ --output-csv results.csv \
+    --mode binary --num-runs 100 --jobs 32
 ```
 
-### QA benchmark (Slurm + disBatch)
-
-`scripts/slurm_qa_benchmark.slurm` is a Slurm batch script that takes an input directory of `.jsonl` files and an output directory. It splits the JSONL on node-local scratch, generates a disBatch task file, and distributes problems across 32 workers.
+**QA (Slurm + disBatch):** Accepts an input directory of `.jsonl` files (one encoded model per line) and an output directory. Splits JSONL on node-local scratch, runs 32 parallel D-Wave workers, and copies the final CSV to the output directory in a single write. Restartable.
 
 ```bash
 sbatch scripts/slurm_qa_benchmark.slurm <INPUT_DIR> <OUTPUT_DIR>
-
-# Examples:
-sbatch scripts/slurm_qa_benchmark.slurm \
-    /mnt/home/user/ceph/.../encodings/truncated_binary/trunc_2/naive \
-    /mnt/home/user/ceph/.../output/encodings/truncated_binary/trunc_2/naive
-
-sbatch scripts/slurm_qa_benchmark.slurm \
-    /mnt/home/user/ceph/.../encodings/one_hot \
-    /mnt/home/user/ceph/.../output/encodings/one_hot
 ```
 
-**I/O design**: all per-problem files (split JSON, CSV rows, Python scripts, D-Wave results) accumulate entirely on node-local `$TMPDIR`. After all tasks complete, the finished CSV is copied to ceph in a single operation. Zero ceph I/O during execution.
-
-**Restartable**: resubmitting the same `sbatch` command copies any existing output CSV back to scratch and skips problems already present in it.
-
-### QA benchmark (GNU parallel)
-
-`scripts/run_benchmark_qa.sh` provides a simpler alternative using GNU parallel for environments without disBatch.
+**QA (GNU parallel):** Simpler alternative for environments without disBatch.
 
 ```bash
 ./scripts/run_benchmark_qa.sh \
-  --input-dir encoded/one_hot/ \
-  --output-csv results/oh_qa_results.csv \
-  --cfn-dir cfns/ \
-  --solver-name Advantage_system6.4 \
-  --num-reads 1000 \
-  --annealing-time 20 \
-  --verbose
+    --input-dir encoded/oh/ --output-csv results.csv \
+    --cfn-dir cfns/ --solver-name Advantage2_system1
 ```
 
-## Output format
+### Input formats
 
-### SA CSV (solve_sa)
-
-A single CSV file with one row per problem instance. Columns:
-
-- **Instance metadata**: `problem_name`, `source_cfn`, `solver_mode`, `encoding`, `variable_type`, `num_qubits`, `num_variables`, `max_cardinality`, `edge_density`, `distribution`
-- **SA configuration**: `schedule`, `move_type`, `T_start`, `T_end`, `num_steps`, `num_runs`, `seed`
-- **Energy statistics**: `best_energy`, `mean_energy`, `std_energy`, `median_energy`, `num_optimal`
-- **Timing**: `total_runtime_s`, `mean_time_per_run_s`
-- **Solution**: `best_solution` (CFN choices as `[X0,X1,...,XN]`)
-- **Raw data**: `per_run_energies` (all best energies as `[E0,E1,...,ER]`)
-
-In CFN mode, `best_solution` contains integer variable assignments directly. In binary mode, the best binary state is decoded to CFN choices using the encoding's decoding rule. The `num_optimal` column counts how many runs found the known ground truth (requires `--ground-truth`); it is `NA` if no ground truth is provided.
-
-### QA CSV (solve_qa)
-
-The QA CSV contains all 26 SA-compatible columns (with `solver_mode=dwave`, SA-specific fields set to `NA`/0) plus additional D-Wave columns:
-
-- **D-Wave configuration**: `solver_name`, `annealing_time_us`, `delta_max`
-- **D-Wave timing**: `inhomog_setup_time_s` (effective field computation), `embedding_time_s`, `qpu_access_time_us`, `qpu_sampling_time_us`, `qpu_programming_time_us`
-- **CFN evaluation**: `best_cfn_energy` (best energy under original CFN among feasible decoded solutions), `num_feasible` (number of D-Wave samples that decode to valid CFN solutions), `num_best_cfn` (number of feasible samples achieving best CFN energy)
-- **Embedding statistics**: `emb_num_physical_qubits`, `emb_chain_length_avg`, `emb_chain_length_median`, `emb_chain_length_var`, `emb_chain_breaks_avg`, `emb_chain_breaks_median`, `emb_chain_breaks_var`
-
-Chain length statistics are computed over the set of logical-to-physical chains in the embedding (one chain per logical variable). Chain break statistics are computed over all D-Wave samples (expanded by `num_occurrences`): for each sample, a chain break is counted when not all physical qubits in a chain agree.
-
-## Input formats
-
-### CFN files (CFN mode)
-
-Toulbar2 JSON format:
-
+**CFN files** (Toulbar2 JSON, for `solve_sa --mode cfn`):
 ```json
 {
   "problem": {"name": "example"},
-  "variables": {"x0": 3, "x1": 4, "x2": 3},
+  "variables": {"x0": 3, "x1": 4},
   "functions": {
     "f0": {"scope": ["x0"], "costs": [1.0, 2.0, 3.0]},
-    "f1": {"scope": ["x1"], "costs": [0.5, 1.5, 2.5, 3.5]},
     "f01": {"scope": ["x0", "x1"], "costs": [0.1, 0.2, ..., 1.2]}
   }
 }
 ```
 
-Costs are flattened row-major with the rightmost scope variable varying fastest. Instance metadata (N, D, rho, distribution) is extracted from filenames matching the pattern `CFN_N<N>_D<D>_rho<rho>_<dist>_<num>.cfn`.
-
-### Encoded model files (binary mode)
-
-JSON files produced by `encoding_tools`:
-
+**Encoded model files** (produced by `encoding_tools`, for `solve_sa --mode binary` and `solve_qa`):
 ```json
 {
   "encoding": "one_hot",
@@ -338,92 +223,36 @@ JSON files produced by `encoding_tools`:
   "num_auxiliary_qubits": 0,
   "offset": 42.5,
   "source_cfn": "example",
-  "qubit_map": {
-    "0": {"variable": 0, "variable_name": "x0", "bit": 0},
-    "1": {"variable": 0, "variable_name": "x0", "bit": 1}
-  },
-  "terms": {
-    "0": -1.5,
-    "0,1": 2.3,
-    "2,5": -0.7
-  }
+  "qubit_map": {"0": {"variable": 0, "variable_name": "x0", "bit": 0}},
+  "terms": {"0": -1.5, "0,1": 2.3}
 }
 ```
 
-Term keys are comma-separated qubit indices. The `qubit_map` maps each logical qubit to its source variable and bit position, enabling solution decoding and step-count calibration.
+### Output formats
 
-## Tests
+**SA CSV** (26 columns): instance metadata, SA configuration, energy statistics (best/mean/std/median), timing, decoded best solution, per-run energies.
 
-Unit tests verify all solver modes and encoding types on a small 2-variable, 4-choice CFN with known ground state E=1.0 at [3,1]. Build and run:
+**QA CSV** (44 columns): the same 26 SA-compatible columns (with `solver_mode=dwave`) plus D-Wave configuration (`solver_name`, `annealing_time_us`, `delta_max`), D-Wave timing (`inhomog_setup_time_s`, `embedding_time_s`, `qpu_access_time_us`, `qpu_sampling_time_us`, `qpu_programming_time_us`), CFN evaluation (`best_cfn_energy`, `num_feasible`, `num_best_cfn`), and embedding statistics (`emb_num_physical_qubits`, `emb_chain_length_avg/median/var`, `emb_chain_breaks_avg/median/var`).
+
+### Tests
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release --target tests
-./build/tests    # or build\Release\tests.exe on Windows
+# SA tests (no external dependencies)
+./build/tests
+
+# QA unit tests (no D-Wave needed)
+./build/tests_qa --test-dir ./tests
+
+# QA D-Wave integration tests (all 10 encoding variants)
+./build/tests_qa --test-dir ./tests --dwave --solver Advantage2_system1 --python ~/dwave-env/bin/python
 ```
 
-Test coverage:
-
-| Test | Encoding | Solver | Expectation |
-|---|---|---|---|
-| CFN flip/shift/both | native | CFN | Exact ground state E=1.0 at [3,1] |
-| One-hot | one_hot | Binary | Exact ground state E=1.0 at [3,1] |
-| Domain-wall | domain_wall | Binary | Exact ground state E=1.0 at [3,1] |
-| Exact-binary | exact_binary | Binary | Exact ground state E=1.0 at [3,1] |
-| Exact-binary (quad) | exact_binary (quadratized) | Binary | Exact ground state E=1.0 at [3,1] |
-| Approximate-binary | approximate_binary | Binary | Best decoded CFN energy (cost-approximate) |
-| Truncated k=2 | truncated_binary | Binary | Best decoded CFN energy (cost-approximate) |
-| Truncated k=3 | truncated_binary | Binary | Best decoded CFN energy (cost-approximate) |
-| Truncated k=3 (quad) | truncated_binary (quadratized) | Binary | Best decoded CFN energy (cost-approximate) |
-
-Cost-preserving encodings (one-hot, domain-wall, exact-binary) must find the exact CFN ground state. Cost-approximate encodings (approximate-binary, truncated-binary) decode the best binary solution to CFN choices and verify both the encoded energy and the native CFN energy.
-
-## Project structure
-
-```
-solver_tools/
-├── CMakeLists.txt
-├── README.md
-├── src/
-│   ├── main.cpp                      # SA CLI entry point (solve_sa)
-│   ├── main_qa.cpp                   # QA CLI entry point (solve_qa)
-│   ├── baseline/
-│   │   ├── sa_types.hpp              # SATimer, temperature schedules, SAParams, RunResult, AggregateResult
-│   │   ├── qa_types.hpp              # QAParams, DWaveSample, DWaveTiming, DWaveResults, QAResult
-│   │   ├── output.hpp                # SA CSV header and row formatting
-│   │   └── output_qa.hpp             # QA CSV header and row formatting
-│   ├── solvers/
-│   │   ├── sa_cfn.hpp                # CFN simulated annealing (flip/shift/both moves)
-│   │   ├── sa_binary.hpp             # Binary SA (single-bit flip, delta evaluation)
-│   │   └── qa_binary.hpp             # D-Wave QA (effective fields, offsets, submission, decoding)
-│   └── utilities/
-│       ├── parse_cfn.hpp             # CFN parser (Toulbar2 JSON), CFNModel, delta_energy
-│       ├── parse_model.hpp           # Binary model parser, BinaryModel, delta_energy, decode_to_cfn
-│       └── dwave_template.hpp        # Embedded Python submission script template
-├── scripts/
-│   ├── run_benchmark.sh              # GNU parallel SA benchmark driver
-│   ├── run_benchmark_qa.sh           # GNU parallel QA benchmark driver
-│   ├── slurm_qa_benchmark.slurm          # Slurm + disBatch QA benchmark (any encoding)
-│   ├── run_qa_one.sh                 # disBatch per-problem wrapper (scratch isolation)
-│   └── dwave_submit_template.py      # Reference copy of the D-Wave submission template
-└── tests/
-    ├── tests.cpp                     # Unit tests (all solver modes and encodings)
-    ├── test_2x4.cfn                  # Source CFN for test model generation
-    └── test_models/                  # Pre-generated encoded models for tests
-        ├── test_2x4_one_hot.json
-        ├── test_2x4_domain_wall.json
-        ├── test_2x4_exact_binary.json
-        ├── test_2x4_exact_binary_quad.json
-        ├── test_2x4_approximate_binary.json
-        ├── test_2x4_truncated_binary_k2.json
-        ├── test_2x4_truncated_binary_k3.json
-        └── test_2x4_truncated_binary_k3_quad.json
-```
+SA tests verify ground-state recovery for all encodings on a 2-variable, 4-choice CFN. QA tests cover the full pipeline (effective fields, anneal offsets, script generation, mock D-Wave results, decode, CFN evaluation, embedding statistics) for one-hot, domain-wall, exact-binary (quadratized), approximate-binary, truncated-binary k=2, and truncated-binary k=3 (quadratized), each in both natural/unsorted and gray/boltzmann orderings where applicable.
 
 ## Dependencies
 
 - **C++17 compiler** (GCC 7+, Clang 5+, MSVC 2017+)
 - **CMake 3.14+**
 - **[nlohmann/json](https://github.com/nlohmann/json) 3.11.3** (fetched automatically)
-- **GNU parallel** (for benchmark scripts only)
 - **Python 3** with **[dwave-ocean-sdk](https://docs.ocean.dwavesys.com/)** (for `solve_qa` only)
+- **GNU parallel** or **disBatch** (for batch benchmarking scripts only)
