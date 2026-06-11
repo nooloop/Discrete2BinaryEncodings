@@ -4,7 +4,7 @@ Benchmarking data, encoders, and solvers for the manuscript:
 
 > Tristan Zaborniak, Ulrike Stege, and Vikram Khipple Mulligan, "Binary encodings of discrete variables for quantum and classical combinatorial optimization," 2026.
 
-This repository provides the complete pipeline for evaluating five binary-variable encodings of pairwise-decomposable Cost Function Networks (CFNs) across classical simulated annealing and D-Wave quantum annealing: dataset generation, encoding, solving, and solution decoding. All data are deterministically seeded for reproducibility.
+This repository provides the complete pipeline for evaluating five binary-variable encodings of pairwise-decomposable Cost Function Networks (CFNs) across classical simulated annealing, quantum annealing, and quantum imaginary time evolution. Tools include: CFN dataset generation, CFN encoding, solvers and solver interfaces, and analysis and plotting scripts. All benchmarking problems are generated deterministically and all solver settings are noted explicitly for reproducibility.
 
 If these benchmarking data, solvers, or analyses are copied, reproduced, or used otherwise, please cite the above manuscript (arXiv: *TODO*).
 
