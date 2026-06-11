@@ -46,12 +46,12 @@ Each subfolder has its own README with detailed contents explanations, build ins
 ## Pipeline overview
 
 ```
-benchmarking_dataset/               encoding_tools/               solver_tools/
-generate_cfn_dataset.py   --->   encode_cfn              --->   solve_sa  (SA)
-        |                             |                          solve_qa  (D-Wave QA)
-   .cfn files                    .json models                   results .csv
-   (Toulbar2 format)          (QUBO/HUBO/Ising)           (energies, solutions,
-                                                           timing, hardware resource stats)
+benchmarking_dataset/            encoding_tools/             solver_tools/                         analysis_tools/
+generate_cfn_dataset.py   --->   encode_cfn         --->     solve_sa  (SA)               --->    
+        |                             |                      solve_qa  (D-Wave QA)
+   .cfn files                    .json models                results .csv
+   (Toulbar2 format)          (QUBO/HUBO/Ising)              (energies, solutions, timing,         (TTS, optimality gap,
+                                                              hardware resource stats)              physical qubits, etc.)
 ```
 
 1. **Generate** CFN instances with `benchmarking_dataset/generate_cfn_dataset.py`.
