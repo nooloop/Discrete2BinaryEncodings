@@ -24,11 +24,11 @@ Discrete2BinaryEncodings/
 ├── benchmarking_dataset/           # CFN instance generator
 │   ├── generate_cfn_dataset.py     #   deterministic CFN generator (Toulbar2 .cfn)
 │   └── README.md
-├── encoding_tools/                 # CFN → QUBO/HUBO/Ising encoder
+├── encoding_tools/                 # CFN to QUBO/HUBO/Ising encoder
 │   ├── CMakeLists.txt
 │   ├── README.md
 │   ├── src/                        #   C++17 source (OH, DW, EB, AB, TB encodings)
-│   ├── python/                     #   dimod converter for D-Wave interop
+│   ├── python/                     #   dimod converter for D-Wave
 │   ├── tests/                      #   unit tests
 │   ├── test_cfns/                  #   sample CFN inputs
 │   └── test_output/                #   sample encoded outputs
@@ -36,11 +36,11 @@ Discrete2BinaryEncodings/
     ├── CMakeLists.txt
     ├── README.md
     ├── src/                        #   C++17 source (SA, QA, parsers, output)
-    ├── scripts/                    #   benchmark drivers (GNU parallel, disBatch, Slurm)
-    └── tests/                      #   unit + integration tests (SA and D-Wave)
+    ├── scripts/                    #   benchmarking scripts
+    └── tests/                      #   unit tests
 ```
 
-Each subfolder has its own README with detailed build instructions, CLI references, and output format descriptions.
+Each subfolder has its own README with detailed contents explanations, build instructions, CLI references, usage overviews, and input/output format descriptions.
 
 ### Pipeline overview
 
@@ -50,7 +50,7 @@ generate_cfn_dataset.py   --->   encode_cfn              --->   solve_sa  (SA)
         |                             |                          solve_qa  (D-Wave QA)
    .cfn files                    .json models                   results .csv
    (Toulbar2 format)          (QUBO/HUBO/Ising)           (energies, solutions,
-                                                           timing, embedding stats)
+                                                           timing, hardware resource stats)
 ```
 
 1. **Generate** CFN instances with `benchmarking_dataset/generate_cfn_dataset.py`.
