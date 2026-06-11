@@ -61,19 +61,17 @@ generate_cfn_dataset.py   --->   encode_cfn         --->     solve_sa  (SA)     
 
 ## Encodings
 
-Five encodings of discrete CFN variables into binary variables are provided:
+Five encodings of discrete CFN variables into binary variables are provided (note that output degree is in reference to just a single variable):
 
 | Encoding | Bits per variable | Variable type | Output degree |
 |---|---|---|---|
-| **One-hot (OH)** | d_i | BINARY {0,1} | 2 (QUBO) |
-| **Domain-wall (DW)** | d_i - 1 | BINARY {0,1} | 2 (QUBO) |
-| **Exact-binary (EB)** | ceil(log2(d_i)) | BINARY {0,1} | up to ceil(log2(d_i)) (HUBO) |
-| **Approximate-binary (AB)** | ceil(log2(d_i)) | BINARY {0,1} | k_approx (default 2, QUBO) |
-| **Truncated-binary (TB)** | ceil(log2(d_i)) | SPIN {-1,+1} | k_trunc (default 2) |
+| **One-hot (OH)** | $d_i$ | BINARY {0,1} | 2 (QUBO) |
+| **Domain-wall (DW)** | $d_i - 1$ | BINARY {0,1} | 2 (QUBO) |
+| **Exact-binary (EB)** | $\lceil log2(d_i)\rceil$ | BINARY {0,1} | up to $\lceil log2(d_i)\rceil$ (HUBO) |
+| **Approximate-binary (AB)** | $\lceil log2(d_i)\rceil$ | BINARY {0,1} | k_approx (default 2, QUBO) |
+| **Truncated-binary (TB)** | $\lceil log2(d_i)\rceil$ | SPIN {-1,+1} | k_trunc (default 2, QUBO) |
 
-For EB, TB, and AB, two choice-to-bitstring assignment strategies are tested: the **naive** canonical binary-order assignment, and the **enhanced** assignment (Boltzmann-average-sorted choices with Gray-code bitstrings and linearly-independent prioritization). OH and DW are tested in their canonical form only.
-
-Higher-order encodings (EB, TB with k >= 3) can be reduced to QUBOs via Rosenberg quadratization for platforms that require degree-2 interactions (e.g., D-Wave).
+For EB, TB, and AB, two choice-to-bitstring assignment strategies are tested: the **naive** canonical binary-order assignment, and the **enhanced** assignment (Boltzmann-average-sorted choices with Gray-code bitstrings, and linearly-independent prioritization in the case of AB). OH and DW are tested in their canonical form only. Higher-order encodings (EB, TB with k >= 3) can be reduced to QUBOs via Rosenberg quadratization for platforms that require degree-2 interactions.
 
 See `encoding_tools/README.md` for detailed encoding descriptions, Lagrange multiplier computation, and quadratization.
 
