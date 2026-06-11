@@ -11,6 +11,7 @@ If these benchmarking data, solvers, or analyses are copied, reproduced, or used
 ## Table of Contents
 
 - [Contents](#contents)
+- [Pipeline Overview](#pipeline_overview)
 - [Encodings](#encodings)
 - [Usage](#usage)
 - [Dependencies](#dependencies)
@@ -42,7 +43,7 @@ Discrete2BinaryEncodings/
 
 Each subfolder has its own README with detailed contents explanations, build instructions, CLI references, usage overviews, and input/output format descriptions.
 
-### Pipeline overview
+## Pipeline overview
 
 ```
 benchmarking_dataset/               encoding_tools/               solver_tools/
