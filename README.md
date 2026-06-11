@@ -57,6 +57,7 @@ generate_cfn_dataset.py   --->   encode_cfn         --->     solve_sa  (SA)     
 1. **Generate** CFN instances with `benchmarking_dataset/generate_cfn_dataset.py`.
 2. **Encode** each CFN into one or more binary-variable models with `encoding_tools/encode_cfn`.
 3. **Solve** each encoded model with `solver_tools/solve_sa` (simulated annealing) or `solver_tools/solve_qa` (D-Wave quantum annealing), producing per-instance CSV rows with energy statistics, decoded CFN solutions, and platform-specific metrics.
+4. **Analyze** each solver/encoding output across graph vertex count, choice count, edge density, and coefficient distribution, producing figures and tables showing TTS, optimality gap, logical vs. physical qubit count, circuit depth, chain breaks, etc.
 
 ## Encodings
 
