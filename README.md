@@ -10,7 +10,7 @@ A CFN over $N$ discrete variables $\vec{d}=(d_1,\dots,d_N)$ of cardinalities $\l
 
 $$
 H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \; \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i},
-\qquad x_{i,c_i}\in\{0,1\},
+\qquad x_{i,c_i}\in\{0,1\}
 $$
 
 and every encoding here replaces the discrete indicator $x_{i,c_i}$ with a specific function of binary variables, producing a QUBO, HUBO, or Ising model.
