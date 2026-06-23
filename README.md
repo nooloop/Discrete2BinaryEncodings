@@ -140,8 +140,7 @@ Figures and tables are produced from the solver CSV outputs described above.See 
 | **Encoding** | C++17 compiler, CMake 3.14+, [nlohmann/json](https://github.com/nlohmann/json) (fetched), [Eigen](https://eigen.tuxfamily.org/) (fetched), OpenMP (optional) |
 | **SA solving** | C++17 compiler, CMake 3.14+, nlohmann/json (fetched) |
 | **D-Wave QA solving** | Above + Python 3 with [dwave-ocean-sdk](https://docs.ocean.dwavesys.com/) and D-Wave Leap access |
-| **UB QA solving** | Above + Python 3 with [dwave-ocean-sdk](https://docs.ocean.dwavesys.com/) and D-Wave Leap access |
-| **Batch benchmarking** | [GNU parallel](https://www.gnu.org/software/parallel/) (optional) |
+| **IBM QITE solving** | Above + Python 3 with [qiskit](https://www.ibm.com/quantum/qiskit) Qiskit Runtime access|
 
 ## Citations
 
@@ -156,4 +155,4 @@ If you use this repository, please cite the manuscript:
 }
 ```
 
-This work additionally builds on third-party tools that should be cited where appropriate: [Toulbar2](https://github.com/toulbar2/toulbar2) (reference ground states), the [D-Wave Ocean SDK](https://docs.ocean.dwavesys.com/) (quantum annealing), [nlohmann/json](https://github.com/nlohmann/json), and [Eigen](https://eigen.tuxfamily.org/).
+This work additionally builds on third-party tools that should be cited where appropriate: [Toulbar2](https://github.com/toulbar2/toulbar2) (reference ground states), the [D-Wave Ocean SDK](https://docs.ocean.dwavesys.com/) (quantum annealing), [nlohmann/json](https://github.com/nlohmann/json), and [Eigen](https://eigen.tuxfamily.org/), etc.
