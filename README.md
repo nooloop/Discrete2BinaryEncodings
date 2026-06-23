@@ -1,10 +1,10 @@
 # Discrete2BinaryEncodings
 
-Benchmarking data, encoders, and solvers for the manuscript:
+Benchmarking data, encoders, solvers, solver interfaces, and analyses for the manuscript:
 
 > Tristan Zaborniak, Ulrike Stege, and Vikram Khipple Mulligan, "Binary encodings of discrete variables for quantum and classical combinatorial optimization," 2026.
 
-This repository provides the evaluation pipeline for five binary-variable encodings of pairwise-decomposable Cost Function Networks (CFNs) across classical simulated annealing, quantum annealing, and gate-based quantum imaginary time evolution. The tooling covers CFN dataset generation, CFN-to-binary encoding, solvers and solver interfaces, and the analyses that compare them. All benchmarking instances are generated deterministically and all solver settings are stated explicitly, for full reproducibility.
+This repository provides the evaluation pipeline for five binary-variable encodings of pairwise-decomposable Cost Function Networks (CFNs) across classical simulated annealing, quantum annealing, and gate-based quantum imaginary time evolution. All benchmarking instances are generated deterministically and all solver settings are stated explicitly, for full reproducibility.
 
 A CFN over $N$ discrete variables $\vec{d}=(d_1,\dots,d_N)$ of cardinalities $\lvert d_1\rvert,\dots,\lvert d_N\rvert$ has the indicator-form objective
 
@@ -34,20 +34,20 @@ If these benchmarking data, encoders, solvers, or analyses are copied, reproduce
 Discrete2BinaryEncodings/
 ├── README.md
 ├── benchmarking_dataset/           # CFN instance generator
-│   ├── generate_cfn_dataset.py     #   deterministic CFN generator (Toulbar2 .cfn)
+│   ├── generate_cfn_dataset.py     #   deterministic CFN generator (outputs to Toulbar2 .cfn format)
 │   └── README.md
-├── encoding_tools/                 # CFN to QUBO/HUBO/Ising encoder
+├── encoding_tools/                 # CFN to QUBO/HUBO/Ising encoders
 │   ├── CMakeLists.txt
 │   ├── README.md
-│   ├── src/                        #   C++17 source (OH, DW, EB, AB, TB encodings)
+│   ├── src/                        #   C++17 source (one-hot, domain-wall, exact-binary, approximate-binary, truncated-binary encodings)
 │   ├── python/                     #   dimod converter for D-Wave
 │   ├── tests/                      #   unit tests
 │   ├── test_cfns/                  #   sample CFN inputs
 │   └── test_output/                #   sample encoded outputs
-└── solver_tools/                   # SA + D-Wave QA solvers
+└── solver_tools/                   # SA + D-Wave QA + IBM QITE solvers
     ├── CMakeLists.txt
     ├── README.md
-    ├── src/                        #   C++17 source (SA, QA, parsers, output)
+    ├── src/                        #   C++17 source (SA, QA, QITE, parsers, output)
     ├── scripts/                    #   benchmarking scripts
     └── tests/                      #   unit tests
 ```
