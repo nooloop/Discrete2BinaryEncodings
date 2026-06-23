@@ -1,20 +1,27 @@
 # benchmarking_dataset
 
-Reproducible generator for synthetic, pairwise-decomposable Cost Function Networks (CFNs) used as the common evaluation set across all solvers in the manuscript. Each instance is written in the [Toulbar2](https://github.com/toulbar2/toulbar2) `.cfn` JSON format and deterministically seeded so the dataset can be regenerated exactly.
+Reproducible generator for synthetic, pairwise-decomposable Cost Function Networks (CFNs) — the common evaluation set used across every encoding and solver in the manuscript. Each instance is written in the [Toulbar2](https://github.com/toulbar2/toulbar2) `.cfn` JSON format and is deterministically seeded, so the entire dataset can be regenerated bit-for-bit.
+
+A CFN over $N$ discrete variables $\vec{d}=(d_1,\dots,d_N)$ of cardinalities $\lvert d_1\rvert,\dots,\lvert d_N\rvert$ has the indicator-form objective
+
+$$
+H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \; \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i},
+$$
+
+where $x_{i,c_i}\in\{0,1\}$ indicates variable $i$ taking choice $c_i$, $[N]=\{1,\dots,N\}$, and $\boldsymbol{c}=(c_i)_{i\in S}$. This generator emits the unary ($\lvert S\rvert=1$) and pairwise ($\lvert S\rvert=2$) cost tables $C_{S;\boldsymbol{c}}$ that define each instance.
 
 ## Table of Contents
 
 - [Contents](#contents)
 - [Usage](#usage)
-  - [Generating the dataset](#generating-the-dataset)
-  - [Finding ground states with Toulbar2](#finding-ground-states-with-toulbar2)
-  - [Instance naming convention](#instance-naming-convention)
-  - [CFN file format](#cfn-file-format)
+  - [Examples](#examples)
+  - [Input format](#input-format)
+  - [Output format](#output-format)
 - [Dependencies](#dependencies)
 
 ## Contents
 
-This folder contains the generation script. The generated CFN files themselves are stored on the compute cluster (not committed to the repository due to their number and size).
+This folder contains a single generation script. The generated `.cfn` files are not committed to the repository (they number in the tens of thousands); they are produced on demand and stored on the compute cluster.
 
 ```
 benchmarking_dataset/
@@ -22,30 +29,9 @@ benchmarking_dataset/
 └── generate_cfn_dataset.py    # deterministic CFN generator (Toulbar2 .cfn)
 ```
 
-### Dataset parameters
-
-| Axis | Values |
-|---|---|
-| Variables N | 2, 4, 6, 8, 10, 12, 14, 16, 18, 20 |
-| Cardinality d = 2^D | D in {1, 2, 3, 4, 5, 6, 7, 8} |
-| Edge density rho | 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50 |
-| Distribution | uniform, Gaussian, exponential, Laplace |
-| Draws per setting | 5 |
-
-The edge density is defined as rho = |E| / (N*(N-1)/2), where |E| is the number of pairwise cost tables and N is the number of variables. A unary cost table is drawn for every variable; a full d x d pairwise cost table is drawn for every selected edge and is identically zero otherwise. Cost-table entries are flattened row-major with the rightmost scope variable varying fastest, matching the Toulbar2 `.cfn` convention.
-
-### Distribution parameters
-
-| Distribution | Notation | Parameters |
-|---|---|---|
-| Uniform | U(a,b) | a = -10, b = 10 |
-| Gaussian | N(mu, sigma^2) | mu = 0, sigma = 10 |
-| Exponential | Exp(lambda) | lambda = 1 (mean = 1) |
-| Laplace | Lap(mu, b) | mu = 0, b = 1 |
-
 ## Usage
 
-### Generating the dataset
+### Examples
 
 Generate all instances (reproducible from master seed `20260512`):
 
@@ -53,7 +39,7 @@ Generate all instances (reproducible from master seed `20260512`):
 python generate_cfn_dataset.py -o cfns
 ```
 
-Generate a subset (e.g., only N=4, D=2, uniform):
+Generate a subset (e.g., only $N=4$, $D=2$, uniform):
 
 ```bash
 python generate_cfn_dataset.py -o cfns --N 4 --D 2 --dist uniform
@@ -65,7 +51,50 @@ Dry run (print filenames without writing):
 python generate_cfn_dataset.py --dry-run
 ```
 
-Additional options:
+#### Finding ground states with Toulbar2
+
+Reference ground states are obtained with [Toulbar2](https://github.com/toulbar2/toulbar2) v1.2.1, an exact CFN solver combining best-first branch-and-bound with parallel variable-neighbourhood search. Toulbar2 is run directly on the `.cfn` files, with no intermediate conversion:
+
+```bash
+toulbar2 cfns/CFN_N4_D2_rho0.3_uniform_1.cfn -w
+```
+
+The `-w` flag writes the optimal solution to a file. For batch ground-state computation on a Slurm cluster (64-core Intel Ice Lake nodes, 3.7 GHz, 1 TB RAM), 32 Toulbar2 tasks are run in parallel with 1 CPU per task, with the remaining 32 cores held dormant to avoid thermal throttling and resource contention; this can be orchestrated with GNU parallel:
+
+```bash
+find cfns/ -name "*.cfn" | parallel -j 32 toulbar2 {} -w
+```
+
+The resulting ground-state energies and runtimes are the reference against which all other solvers are scored (see [`../solver_tools`](../solver_tools)).
+
+### Input format
+
+The generator reads no input files; its "input" is the stratification parameter space below, exposed through CLI flags. The full benchmark sweeps four axes:
+
+| Axis | Symbol | Values |
+|---|---|---|
+| Variable count | $N$ | $2, 4, 6, \dots, 20$ |
+| Cardinality | $\lvert d\rvert = 2^{D}$ | $D \in \{1,2,3,4,5,6,7,8\}$ |
+| Edge density | $\rho$ | $0.10, 0.15, 0.20, \dots, 0.50$ |
+| Coupling distribution | $R$ | uniform, Gaussian, exponential, Laplace |
+| Draws per setting | $P$ | $5$ |
+
+The total instance count is
+
+$$
+\lvert\mathcal{N}\rvert \times \lvert\mathcal{D}\rvert \times \lvert\boldsymbol{\rho}\rvert \times \lvert\mathcal{R}\rvert \times P \;=\; 10 \times 8 \times 9 \times 4 \times 5 \;=\; 14{,}400 .
+$$
+
+The edge density is $\rho = \lvert E\rvert / \binom{N}{2}$, where $\lvert E\rvert$ is the number of non-trivial pairwise cost tables. A unary cost table is drawn for every variable; a full $\lvert d\rvert \times \lvert d\rvert$ pairwise table is drawn for every selected edge and is identically zero otherwise. Cardinalities are constrained to powers of two ($\lvert d\rvert = 2^{D}$) to avoid codeword-duplication artifacts in the bit-efficient encodings. Coupling distribution parameters:
+
+| Distribution | Notation | Parameters |
+|---|---|---|
+| Uniform | $\mathcal{U}(a,b)$ | $a=-10,\ b=10$ |
+| Gaussian | $\mathcal{N}(\mu,\sigma^2)$ | $\mu=0,\ \sigma=10$ |
+| Exponential | $\mathrm{Exp}(\lambda)$ | $\lambda=1$ (mean $1$) |
+| Laplace (decaying-exponential) | $\mathrm{Lap}(\mu,b)$ | $\mu=0,\ b=1$ |
+
+CLI options:
 
 ```
 -o, --out-dir DIR               Output directory (default: cfn_dataset)
@@ -76,35 +105,18 @@ Additional options:
 --D D [D ...]                   Restrict cardinality exponents
 --rho R [R ...]                 Restrict edge densities
 --dist D [D ...]                Restrict distributions
+--dry-run                       Print filenames without writing
 ```
 
-### Finding ground states with Toulbar2
+### Output format
 
-Ground-state solutions are obtained using [Toulbar2](https://github.com/toulbar2/toulbar2) v1.2.1, an exact CFN solver combining best-first branch-and-bound with parallel variable-neighbourhood search. Toulbar2 is run directly on the `.cfn` files without intermediate conversion:
-
-```bash
-toulbar2 cfns/CFN_N4_D2_rho0.3_uniform_1.cfn -w
-```
-
-For batch ground-state computation on a Slurm cluster with 64-core Intel Ice Lake nodes (3.7 GHz, 1 TB RAM), 32 Toulbar2 tasks are executed in parallel using 1 CPU per task, with the remaining 32 cores held dormant to avoid thermal throttling and resource contention. This can be orchestrated with GNU parallel or disBatch:
-
-```bash
-find cfns/ -name "*.cfn" | parallel -j 32 toulbar2 {} -w
-```
-
-The `-w` flag instructs Toulbar2 to write the optimal solution to a file. The resulting ground-state energies and timing information serve as the reference against which all other solvers are scored.
-
-### Instance naming convention
-
-Each instance is named:
+Each instance is named
 
 ```
 CFN_N<N>_D<D>_rho<rho>_<distribution>_<number>.cfn
 ```
 
-where `d = 2^D` is the cardinality (number of choices per variable) and `<number>` indexes the independent draw within each `(N, D, rho, distribution)` combination.
-
-### CFN file format
+where $\lvert d\rvert = 2^{D}$ is the cardinality (choices per variable) and `<number>` indexes the independent draw within each $(N, D, \rho, \text{distribution})$ combination.
 
 Each `.cfn` file is a Toulbar2 JSON document:
 
@@ -114,17 +126,19 @@ Each `.cfn` file is a Toulbar2 JSON document:
   "variables": {"x0": 4, "x1": 4, "x2": 4, "x3": 4},
   "functions": {
     "f_x0": {"scope": ["x0"], "costs": [1.0, -2.5, 3.0, 0.5]},
-    "f_x0_x1": {"scope": ["x0", "x1"], "costs": [0.1, 0.2, ..., 1.6]}
+    "f_x0_x1": {"scope": ["x0", "x1"], "costs": [0.1, 0.2, "...", 1.6]}
   }
 }
 ```
 
-- `variables`: maps variable names to their cardinality (number of choices).
-- `functions`: unary tables (one per variable) and pairwise tables (one per edge), with costs flattened row-major.
+- `variables`: maps each variable name to its cardinality $\lvert d_i\rvert$.
+- `functions`: unary tables (one per variable) and pairwise tables (one per edge), with costs flattened row-major and the rightmost scope variable varying fastest (the Toulbar2 convention).
 - `mustbe`: an upper bound on the optimal cost, used by Toulbar2 for pruning.
 
 ## Dependencies
 
-- **Python 3.10+**
-- **NumPy** (`pip install numpy`)
-- **[Toulbar2](https://github.com/toulbar2/toulbar2) v1.2.1** (for ground-state computation; not required for dataset generation)
+| Component | Requirement |
+|---|---|
+| Dataset generation | Python 3.10+, [NumPy](https://numpy.org/) (`pip install numpy`) |
+| Ground-state references | [Toulbar2](https://github.com/toulbar2/toulbar2) v1.2.1 (not required for generation) |
+| Batch ground states | [GNU parallel](https://www.gnu.org/software/parallel/) (optional) |

@@ -4,18 +4,29 @@ Benchmarking data, encoders, and solvers for the manuscript:
 
 > Tristan Zaborniak, Ulrike Stege, and Vikram Khipple Mulligan, "Binary encodings of discrete variables for quantum and classical combinatorial optimization," 2026.
 
-This repository provides the complete evaluation pipeline of five binary-variable encodings of pairwise-decomposable Cost Function Networks (CFNs) across classical simulated annealing, quantum annealing, and quantum imaginary time evolution. Tools include: CFN dataset generation, CFN encoding, solvers and solver interfaces, and analysis and plotting scripts. All benchmarking problems are generated deterministically and all solver settings are noted explicitly for reproducibility.
+This repository provides the evaluation pipeline for five binary-variable encodings of pairwise-decomposable Cost Function Networks (CFNs) across classical simulated annealing, quantum annealing, and gate-based quantum imaginary time evolution. The tooling covers CFN dataset generation, CFN-to-binary encoding, solvers and solver interfaces, and the analyses that compare them. All benchmarking instances are generated deterministically and all solver settings are stated explicitly, for full reproducibility.
 
-If these benchmarking data, solvers, or analyses are copied, reproduced, or used otherwise, please cite the above manuscript (arXiv: *TODO*).
+A CFN over $N$ discrete variables $\vec{d}=(d_1,\dots,d_N)$ of cardinalities $\lvert d_1\rvert,\dots,\lvert d_N\rvert$ has the indicator-form objective
+
+$$
+H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \; \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i},
+\qquad x_{i,c_i}\in\{0,1\},
+$$
+
+and every encoding here replaces the discrete indicator $x_{i,c_i}$ with a specific function of binary variables, producing a QUBO, HUBO, or Ising model.
+
+If these benchmarking data, encoders, solvers, or analyses are copied, reproduced, or otherwise used, please cite the manuscript (see [Citations](#citations)).
 
 ## Table of Contents
 
 - [Contents](#contents)
-- [Pipeline Overview](#pipeline_overview)
-- [Encodings](#encodings)
-- [Usage](#usage)
+- [Pipeline](#pipeline)
+  - [Dataset](#dataset)
+  - [Encodings](#encodings)
+  - [Solvers](#solvers)
+  - [Analyses](#analyses)
 - [Dependencies](#dependencies)
-- [Citation](#citation)
+- [Citations](#citations)
 
 ## Contents
 
@@ -41,108 +52,99 @@ Discrete2BinaryEncodings/
     └── tests/                      #   unit tests
 ```
 
-Each subfolder has its own README with detailed contents explanations, build instructions, CLI references, usage overviews, and input/output format descriptions.
+Each sub-directory has its own README with detailed contents, build/test instructions, CLI references, usage examples, and input/output format descriptions.
 
-## Pipeline overview
+## Pipeline
+
+The benchmark proceeds in four stages: generate a common dataset, encode each instance under every encoding, solve each encoded model on each platform, and analyze the results across problem axes.
 
 ```
-benchmarking_dataset/            encoding_tools/             solver_tools/                         analysis_tools/
-generate_cfn_dataset.py   --->   encode_cfn         --->     solve_sa  (SA)               --->    
-        |                             |                      solve_qa  (D-Wave QA)
-   .cfn files                    .json models                results .csv
-   (Toulbar2 format)          (QUBO/HUBO/Ising)              (energies, solutions, timing,         (TTS, optimality gap,
-                                                              hardware resource stats)              physical qubits, etc.)
+ benchmarking_dataset/        encoding_tools/            solver_tools/                     analyses
+ generate_cfn_dataset.py  ->  encode_cfn           ->    solve_sa  (classical SA)    ->    TTS, optimality gap,
+        │                          │                     solve_qa  (D-Wave QA)             scaling fits, qubit /
+   .cfn instances            .json models                + QITE (manuscript arm)           chain / gate statistics
+   (Toulbar2 format)        (QUBO / HUBO / Ising)        results .csv
 ```
 
-1. **Generate** CFN instances with `benchmarking_dataset/generate_cfn_dataset.py`.
-2. **Encode** each CFN into one or more binary-variable models with `encoding_tools/encode_cfn`.
-3. **Solve** each encoded model with `solver_tools/solve_sa` (simulated annealing) or `solver_tools/solve_qa` (D-Wave quantum annealing), producing per-instance CSV rows with energy statistics, decoded CFN solutions, and platform-specific metrics.
-4. **Analyze** each solver/encoding output across graph vertex count, choice count, edge density, and coefficient distribution, producing figures and tables showing TTS, optimality gap, logical vs. physical qubit count, circuit depth, chain breaks, etc.
+### Dataset
 
-## Encodings
+[`benchmarking_dataset/`](benchmarking_dataset) generates synthetic, pairwise-decomposable CFNs stratified across four axes — variable count $N$, cardinality $\lvert d\rvert=2^{D}$, edge density $\rho$, and coupling distribution $R$ — with $P=5$ independent draws per setting, for
 
-Five encodings of discrete CFN variables into binary variables are provided (note that output degree is in reference to just a single variable):
+$$
+\lvert\mathcal{N}\rvert \times \lvert\mathcal{D}\rvert \times \lvert\boldsymbol{\rho}\rvert \times \lvert\mathcal{R}\rvert \times P \;=\; 10 \times 8 \times 9 \times 4 \times 5 \;=\; 14{,}400
+$$
 
-| Encoding | Bits per variable | Variable type | Output degree |
-|---|---|---|---|
-| **One-hot (OH)** | $d_i$ | BINARY {0,1} | 2 (QUBO) |
-| **Domain-wall (DW)** | $d_i - 1$ | BINARY {0,1} | 2 (QUBO) |
-| **Exact-binary (EB)** | $\lceil log2(d_i)\rceil$ | BINARY {0,1} | up to $\lceil log2(d_i)\rceil$ (HUBO) |
-| **Approximate-binary (AB)** | $\lceil log2(d_i)\rceil$ | BINARY {0,1} | k_approx (default 2, QUBO) |
-| **Truncated-binary (TB)** | $\lceil log2(d_i)\rceil$ | SPIN {-1,+1} | k_trunc (default 2, QUBO) |
+instances. Cardinalities are constrained to powers of two to avoid codeword-duplication artifacts in the bit-efficient encodings, and the four distributions (uniform, Gaussian, exponential, Laplace) span bounded/unbounded and light-/heavy-tailed regimes. Every coefficient is drawn from a fixed, reproducible seed (`20260512`). [Toulbar2](https://github.com/toulbar2/toulbar2) is run on every instance to produce reference ground states $E_{\text{GS}}$, against which all solvers are scored. See [`benchmarking_dataset/README.md`](benchmarking_dataset/README.md).
 
-For EB, TB, and AB, two choice-to-bitstring assignment strategies are tested: the **naive** canonical binary-order assignment, and the **enhanced** assignment (Boltzmann-average-sorted choices with Gray-code bitstrings, and linearly-independent prioritization in the case of AB). OH and DW are tested in their canonical form only. Higher-order encodings (EB, TB with k >= 3) can be reduced to QUBOs via Rosenberg quadratization for platforms that require degree-2 interactions.
+### Encodings
 
-See `encoding_tools/README.md` for detailed encoding descriptions, Lagrange multiplier computation, and quadratization.
+[`encoding_tools/`](encoding_tools) implements five binary encodings, split into two families. *Cost-preserving* encodings reproduce feasible-solution energies exactly; *cost-approximate* encodings accept bounded error in exchange for minimal bit count and degree.
 
-## Usage
+| Encoding | Family | Bits per variable | Variable type | Output degree |
+|---|---|---|---|---|
+| **One-hot (OH)** | cost-preserving | $\lvert d_i\rvert$ | BINARY $\{0,1\}$ | $2$ (QUBO) |
+| **Domain-wall (DW)** | cost-preserving | $\lvert d_i\rvert - 1$ | BINARY $\{0,1\}$ | $2$ (QUBO) |
+| **Exact-binary (EB)** | cost-preserving | $\lceil\log_2\lvert d_i\rvert\rceil$ | BINARY $\{0,1\}$ | up to $\sum_j\lceil\log_2\lvert d_{i_j}\rvert\rceil$ (HUBO) |
+| **Approximate-binary (AB)** | cost-approximate | $\lceil\log_2\lvert d_i\rvert\rceil$ | BINARY $\{0,1\}$ | $k_{\text{approx}}$ (default $2$, QUBO) |
+| **Truncated-binary (TB)** | cost-approximate | $\lceil\log_2\lvert d_i\rvert\rceil$ | SPIN $\{-1,+1\}$ | $k_{\text{trunc}}$ (default $2$, QUBO) |
 
-### 1. Generate the benchmarking dataset
+- **One-hot** and **domain-wall** use one binary variable per choice (resp. per choice boundary) and enforce feasibility with a MOMC Lagrange penalty $\lambda_i = W_c/\gamma$, where $W_c$ bounds the single-flip objective gain and $\gamma$ the minimum infeasible penalty.
+- **Exact-binary** expands each indicator by inclusion–exclusion into a multilinear polynomial — exact, but generally HUBO.
+- **Approximate-binary** fits coefficients by least squares onto a degree-$\le k_{\text{approx}}$ monomial basis, $\vec{B}=\mathbf{Q}^{\dagger}\vec{E}$, eliminating infeasible solutions and Lagrange multipliers while bounding degree.
+- **Truncated-binary** projects the exact-binary cost onto a degree-$\le k_{\text{trunc}}$ Walsh–Hadamard expansion $H_{\text{EB}}(\vec{b})=\sum_S \widehat{H}_S\,\chi_S(\vec{b})$, with $\chi_S(\vec{b})=\prod_{q\in S}(1-2b_q)$.
 
-```bash
-cd benchmarking_dataset
-python generate_cfn_dataset.py -o ../cfns
-```
+Both cost-approximate encodings carry an $L^\infty$ error bound $\varepsilon$ that controls optimum preservation: if the exact-binary energy gap satisfies $\Delta E^\star > 2\varepsilon$, every minimizer of the approximate model is also a minimizer of $H_{\text{EB}}$. For EB, AB, and TB, two choice-to-bitstring assignment strategies are tested — the **naive** canonical binary-order assignment and the **enhanced** assignment (Boltzmann-average-sorted choices with Gray-code bitstrings, plus linearly-independent prioritization for AB). Higher-order encodings (EB, and TB with $k_{\text{trunc}}\ge 3$) are reduced to QUBOs via Rosenberg quadratization, with penalty $M = 2\max_{\lvert S\rvert>2}\lvert c_S\rvert$, for platforms that admit only degree-$2$ interactions. See [`encoding_tools/README.md`](encoding_tools/README.md).
 
-See `benchmarking_dataset/README.md` for dataset parameters and ground-state computation with Toulbar2.
+### Solvers
 
-### 2. Encode CFNs
+The manuscript benchmarks all encodings on three platforms exercising complementary demands:
 
-```bash
-cd encoding_tools
-cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+1. **Classical simulated annealing** — a CPU baseline that solves the native CFN or any encoded QUBO/HUBO directly through single-bit-flip (or multi-valued) moves. Per problem, 100 independent trajectories are run with a five-rampdown geometric schedule ($T_{\text{high}}=100$, $T_{\text{low}}=0.3$ kcal/mol) and $100\cdot N\cdot\lvert d\rvert$ steps per trajectory under Metropolis acceptance.
+2. **D-Wave `Advantage2` quantum annealing** — an analog, finite-precision device admitting only quadratic couplings (Zephyr topology). Encoded QUBOs are minor-embedded with `minorminer` (smallest of 10 attempts), run with $R=1000$ reads at annealing time $T_a=20\,\mu\text{s}$, chain strength set by uniform torque compensation ($\sqrt{2}$ times the RMS coupling), and per-qubit inhomogeneous transverse-field driving.
+3. **Quantum imaginary time evolution (QITE)** on IBM `Heron` gate-based hardware — a digital device admitting higher-order Pauli strings via phase-gadget decomposition, run under the McLachlan variational principle with a hardware-efficient ansatz.
 
-# One-hot encoding
-./build/encode_cfn --input-dir ../cfns --output-dir ../encoded/oh --csv metrics.csv --encoding one_hot
+This repository provides the **classical SA** (`solve_sa`) and **D-Wave QA** (`solve_qa`) solvers in [`solver_tools/`](solver_tools); the QITE arm is specified in the manuscript. Each solver invocation emits one CSV row per instance with energy statistics, the decoded best CFN solution, timing, and platform-specific resource metrics. See [`solver_tools/README.md`](solver_tools/README.md).
 
-# Truncated-binary (k=2) with enhanced assignment
-./build/encode_cfn --input-dir ../cfns --output-dir ../encoded/tb2 --csv metrics.csv \
-    --encoding truncated_binary --k-trunc 2 \
-    --choice-ordering boltzmann --bitstring-ordering gray --li-prioritization
-```
+### Analyses
 
-See `encoding_tools/README.md` for all encoding options and output format.
+The per-instance CSV outputs of the solvers are analyzed across the dataset's stratification axes (solution-space size $S=\prod_i\lvert d_i\rvert = 2^{ND}$, cardinality $\lvert d\rvert$, and edge density $\rho$) using four primary performance measures:
 
-### 3. Solve
+- **Time-to-solution (TTS)** — the wall-clock time to reach $E_{\text{GS}}$ with probability $\ge 50\%$:
 
-**Simulated annealing** (CPU, any encoding):
-```bash
-cd solver_tools
-cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
+$$
+\text{TTS} = T_S\cdot\frac{\ln(1-0.5)}{\ln(1-p_S)} + T_E + T_P + T_R ,
+$$
 
-./build/solve_sa --mode binary --input ../encoded/oh/problem_one_hot.json \
-    --num-runs 100 --steps-multiplier 200
-```
+  where $p_S$ is the per-trajectory success probability and $T_S, T_E, T_P, T_R$ are the trajectory, encoding, programming, and readout times.
 
-**D-Wave quantum annealing** (QUBO/Ising encodings only):
-```bash
-./build/solve_qa --input ../encoded/oh/problem_one_hot.json \
-    --cfn-dir ../cfns --solver Advantage2_system1 \
-    --num-reads 1000 --annealing-time 20
-```
+- **Solution quality** — the optimality gap
 
-**Batch benchmarking** (Slurm + disBatch):
-```bash
-sbatch scripts/slurm_qa_benchmark.slurm ../encoded/tb2 ../output/tb2
-```
+$$
+\Delta = \frac{E_{\text{best}} - E_{\text{GS}}}{E_{\text{worst}} - E_{\text{GS}}} ,
+$$
 
-See `solver_tools/README.md` for full CLI references, batch scripts, and output CSV format.
+  reported as a distribution over instances and as a function of $S$, $\lvert d\rvert$, and $\rho$.
+
+- **Scaling fits** — power laws $\text{TTS}=\alpha S^{\beta}$ fit by right-censored maximum-likelihood estimation under a log-normal noise model, supplemented by a multivariate fit $\text{TTS}=\alpha S^{\beta_S}\lvert d\rvert^{\beta_d}(1+\rho)^{\beta_\rho}$. Pairwise differences in scaling exponents are tested by nested-model likelihood-ratio tests with Holm–Bonferroni family-wise error-rate control over the $\binom{5}{2}=10$ encoding comparisons per platform.
+
+- **Resource accounting and failure modes** — per encoding and platform: logical bit count, couplings by interaction degree, maximum and coefficient-weighted mean degree $\langle k\rangle$, and coefficient dynamic range $\lvert c_{\max}\rvert/\lvert c_{\min}\rvert$ for SA; physical-qubit count, chain length, chain-break fraction, and embedding success rate for QA; and Pauli-string count, Pauli weight, two-qubit gate count, and circuit depth for QITE. Failure modes (SA trapping, D-Wave chain breaks, QITE expressibility floors) are reported rather than excluded.
+
+These analyses are derived from the manuscript; the figures and tables are produced from the solver CSV outputs described above.
 
 ## Dependencies
 
 | Component | Requirements |
 |---|---|
-| **Dataset generation** | Python 3.10+, NumPy |
+| **Dataset generation** | Python 3.10+, [NumPy](https://numpy.org/) |
 | **Ground-state references** | [Toulbar2](https://github.com/toulbar2/toulbar2) v1.2.1 |
-| **Encoding** | C++17 compiler, CMake 3.14+, nlohmann/json (fetched), Eigen (fetched) |
+| **Encoding** | C++17 compiler, CMake 3.14+, [nlohmann/json](https://github.com/nlohmann/json) (fetched), [Eigen](https://eigen.tuxfamily.org/) (fetched), OpenMP (optional) |
 | **SA solving** | C++17 compiler, CMake 3.14+, nlohmann/json (fetched) |
-| **D-Wave QA solving** | Above + Python 3 with [dwave-ocean-sdk](https://docs.ocean.dwavesys.com/), D-Wave Leap access |
+| **D-Wave QA solving** | Above + Python 3 with [dwave-ocean-sdk](https://docs.ocean.dwavesys.com/) and D-Wave Leap access |
+| **Batch benchmarking** | [GNU parallel](https://www.gnu.org/software/parallel/) (optional) |
 
-## License
+## Citations
 
-*TODO*
-
-## Citation
+If you use this repository, please cite the manuscript:
 
 ```bibtex
 @article{Zaborniak2026BinaryEncodings,
@@ -152,3 +154,5 @@ See `solver_tools/README.md` for full CLI references, batch scripts, and output 
   note    = {arXiv: TODO}
 }
 ```
+
+This work additionally builds on third-party tools that should be cited where appropriate: [Toulbar2](https://github.com/toulbar2/toulbar2) (reference ground states), the [D-Wave Ocean SDK](https://docs.ocean.dwavesys.com/) (quantum annealing), [nlohmann/json](https://github.com/nlohmann/json), and [Eigen](https://eigen.tuxfamily.org/).
