@@ -1,11 +1,11 @@
 # benchmarking_dataset
 
-Reproducible generator for synthetic, pairwise-decomposable Cost Function Networks (CFNs) — the common evaluation set used across every encoding and solver in the manuscript. Each instance is written in the [Toulbar2](https://github.com/toulbar2/toulbar2) `.cfn` JSON format and is deterministically seeded, so the entire dataset can be regenerated bit-for-bit.
+Generator for the common evaluation set of synthetic, pairwise-decomposable Cost Function Networks (CFNs) used across every encoding and solver in the manuscript. Each instance is written in the [Toulbar2](https://github.com/toulbar2/toulbar2) `.cfn` JSON format and is deterministically seeded, so the entire dataset can be regenerated exactly.
 
-A CFN over $N$ discrete variables $\vec{d}=(d_1,\dots,d_N)$ of cardinalities $\lvert d_1\rvert,\dots,\lvert d_N\rvert$ has the indicator-form objective
+A CFN over $N$ discrete variables $\vec{d}=(d_1,\dots,d_N)$ of cardinalities $\lvert d_1\rvert,\dots,\lvert d_N\rvert$ has the indicator-form objective:
 
 $$
-H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \; \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i},
+H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \; \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i}
 $$
 
 where $x_{i,c_i}\in\{0,1\}$ indicates variable $i$ taking choice $c_i$, $[N]=\{1,\dots,N\}$, and $\boldsymbol{c}=(c_i)_{i\in S}$. This generator emits the unary ($\lvert S\rvert=1$) and pairwise ($\lvert S\rvert=2$) cost tables $C_{S;\boldsymbol{c}}$ that define each instance.
@@ -21,7 +21,7 @@ where $x_{i,c_i}\in\{0,1\}$ indicates variable $i$ taking choice $c_i$, $[N]=\{1
 
 ## Contents
 
-This folder contains a single generation script. The generated `.cfn` files are not committed to the repository (they number in the tens of thousands); they are produced on demand and stored on the compute cluster.
+This folder contains a single generation script. The generated `.cfn` files are not committed to the repository, but can be produced on demand.
 
 ```
 benchmarking_dataset/
@@ -59,17 +59,13 @@ Reference ground states are obtained with [Toulbar2](https://github.com/toulbar2
 toulbar2 cfns/CFN_N4_D2_rho0.3_uniform_1.cfn -w
 ```
 
-The `-w` flag writes the optimal solution to a file. For batch ground-state computation on a Slurm cluster (64-core Intel Ice Lake nodes, 3.7 GHz, 1 TB RAM), 32 Toulbar2 tasks are run in parallel with 1 CPU per task, with the remaining 32 cores held dormant to avoid thermal throttling and resource contention; this can be orchestrated with GNU parallel:
-
-```bash
-find cfns/ -name "*.cfn" | parallel -j 32 toulbar2 {} -w
-```
+The `-w` flag writes the optimal solution to a file. For batch ground-state computation on a Slurm cluster (64-core Intel Ice Lake nodes, 3.7 GHz, 1 TB RAM), 32 Toulbar2 tasks are run in parallel with 1 CPU per task, with the remaining 32 cores held dormant to avoid thermal throttling and resource contention. This was accomplished using `disBatch`.
 
 The resulting ground-state energies and runtimes are the reference against which all other solvers are scored (see [`../solver_tools`](../solver_tools)).
 
 ### Input format
 
-The generator reads no input files; its "input" is the stratification parameter space below, exposed through CLI flags. The full benchmark sweeps four axes:
+The generator reads no input files; its input is the stratification parameter space below. The full benchmark sweeps across four axes:
 
 | Axis | Symbol | Values |
 |---|---|---|
@@ -79,13 +75,13 @@ The generator reads no input files; its "input" is the stratification parameter 
 | Coupling distribution | $R$ | uniform, Gaussian, exponential, Laplace |
 | Draws per setting | $P$ | $5$ |
 
-The total instance count is
+The total instance count is:
 
 $$
 \lvert\mathcal{N}\rvert \times \lvert\mathcal{D}\rvert \times \lvert\boldsymbol{\rho}\rvert \times \lvert\mathcal{R}\rvert \times P \;=\; 10 \times 8 \times 9 \times 4 \times 5 \;=\; 14{,}400 .
 $$
 
-The edge density is $\rho = \lvert E\rvert / \binom{N}{2}$, where $\lvert E\rvert$ is the number of non-trivial pairwise cost tables. A unary cost table is drawn for every variable; a full $\lvert d\rvert \times \lvert d\rvert$ pairwise table is drawn for every selected edge and is identically zero otherwise. Cardinalities are constrained to powers of two ($\lvert d\rvert = 2^{D}$) to avoid codeword-duplication artifacts in the bit-efficient encodings. Coupling distribution parameters:
+The edge density is $\rho = \lvert E\rvert / \binom{N}{2}$, where $\lvert E\rvert$ is the number of non-trivial pairwise cost tables. A unary cost table is drawn for every variable; a full $\lvert d\rvert \times \lvert d\rvert$ pairwise table is drawn for every selected edge and is identically zero otherwise. Cardinalities are constrained to powers of two ($\lvert d\rvert = 2^{D}$) to avoid codeword-duplication artifacts in the bit-efficient encodings. Coefficient distribution parameters:
 
 | Distribution | Notation | Parameters |
 |---|---|---|
@@ -93,6 +89,8 @@ The edge density is $\rho = \lvert E\rvert / \binom{N}{2}$, where $\lvert E\rver
 | Gaussian | $\mathcal{N}(\mu,\sigma^2)$ | $\mu=0,\ \sigma=10$ |
 | Exponential | $\mathrm{Exp}(\lambda)$ | $\lambda=1$ (mean $1$) |
 | Laplace (decaying-exponential) | $\mathrm{Lap}(\mu,b)$ | $\mu=0,\ b=1$ |
+
+`generate_cfn_dataset.py` can be easily modified to sweep across alternative axes, and alternative coefficient distributions.
 
 CLI options:
 
