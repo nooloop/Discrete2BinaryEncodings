@@ -116,7 +116,7 @@ CFN_N<N>_D<D>_rho<rho>_<distribution>_<number>.cfn
 
 where $\lvert d\rvert = 2^{D}$ is the cardinality (choices per variable) and `<number>` indexes the independent draw within each $(N, D, \rho, \text{distribution})$ combination.
 
-Each `.cfn` file is a Toulbar2 JSON document:
+Each `.cfn` file is a Toulbar2 JSON document:https://www.ibm.com/quantum/qiskit
 
 ```json
 {
@@ -139,4 +139,4 @@ Each `.cfn` file is a Toulbar2 JSON document:
 |---|---|
 | Dataset generation | Python 3.10+, [NumPy](https://numpy.org/) (`pip install numpy`) |
 | Ground-state references | [Toulbar2](https://github.com/toulbar2/toulbar2) v1.2.1 (not required for generation) |
-| Batch ground states | [GNU parallel](https://www.gnu.org/software/parallel/) (optional) |
+| Batch ground states | [GNU parallel](https://www.gnu.org/software/parallel/) or `disbatch` (optional) |
