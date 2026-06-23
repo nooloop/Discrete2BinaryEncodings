@@ -109,21 +109,9 @@ This repository provides the each solver/solver interface in [`solver_tools/`](s
 
 The per-instance CSV outputs of the solvers are analyzed across the dataset's stratification axes (solution-space size $S=\prod_i\lvert d_i\rvert = 2^{ND}$, cardinality $\lvert d\rvert$, and edge density $\rho$) using four primary performance measures:
 
-- **Time-to-solution (TTS)** — the wall-clock time to reach $E_{\text{GS}}$ with probability $\ge 99\%$:
+- **Time-to-solution (TTS)** — the wall-clock time to reach $E_{\text{GS}}$ with probability $\ge 99\%$: $\text{TTS} = T_S\cdot\frac{\ln(1-0.99)}{\ln(1-p_S)} + T_E + T_P + T_R$, where $p_S$ is the per-trajectory success probability and $T_S, T_E, T_P, T_R$ are the trajectory, encoding, programming, and readout times.
 
-$$
-\text{TTS} = T_S\cdot\frac{\ln(1-0.99)}{\ln(1-p_S)} + T_E + T_P + T_R ,
-$$
-
-  where $p_S$ is the per-trajectory success probability and $T_S, T_E, T_P, T_R$ are the trajectory, encoding, programming, and readout times.
-
-- **Solution quality** — the optimality gap
-
-$$
-\Delta = \frac{E_{\text{best}} - E_{\text{GS}}}{E_{\text{worst}} - E_{\text{GS}}} ,
-$$
-
-  reported as a distribution over instances and as a function of $S$, $\lvert d\rvert$, and $\rho$.
+- **Solution quality** — the optimality gap $\Delta = \frac{E_{\text{best}} - E_{\text{GS}}}{E_{\text{worst}} - E_{\text{GS}}}$, reported as a distribution over instances and as a function of $S$, $\lvert d\rvert$, and $\rho$.
 
 - **Scaling fits** — power laws $\text{TTS}=\alpha S^{\beta}$ fit by right-censored maximum-likelihood estimation under a log-normal noise model, supplemented by a multivariate fit $\text{TTS}=\alpha S^{\beta_S}\lvert d\rvert^{\beta_d}(1+\rho)^{\beta_\rho}$. Pairwise differences in scaling exponents are tested by nested-model likelihood-ratio tests with Holm–Bonferroni family-wise error-rate control over the $\binom{5}{2}=10$ encoding comparisons per platform.
 
