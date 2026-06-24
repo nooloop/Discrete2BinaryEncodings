@@ -205,7 +205,7 @@ Costs are flattened row-major with the rightmost scope variable varying fastest.
 
 Term keys are comma-separated qubit indices, so a term of degree $k$ contributes $c_S \prod_{q\in S} b_q$. This format is directly consumable the solvers and solver interfaces in [`../solver_tools`](../solver_tools). Sample outputs are in [`test_output/`](test_output).
 
-**CSV metrics.** One row per encoded CFN, with columns covering: instance metadata, encoding configuration, qubit counts, term statistics by degree, coefficient statistics, Lagrange-multiplier and Rosenberg-penalty information, approximation quality ($L^2$/$L^\infty$ error, spectral profile $P_k=\sum_{\lvert S\rvert=k}\widehat{H}_S^2$), per-encoding-phase timing, and variable type.
+**CSV metrics.** One row per encoded CFN, with columns covering: instance metadata, encoding configuration, qubit counts, term statistics by degree, coefficient statistics, Lagrange-multiplier and Rosenberg-penalty information, approximation quality, spectral profile $P_k=\sum_{\lvert S\rvert=k}\widehat{H}_S^2$, per-encoding-phase timing, and variable type.
 
 **Python converter.** [`python/dimod_converter.py`](python/dimod_converter.py) loads the JSON output into Python objects for use with D-Wave's `dimod` library:
 
