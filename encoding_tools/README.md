@@ -73,9 +73,9 @@ encoding_tools/
 
 **Rosenberg quadratization.** Optional post-processing that reduces any HUBO to a QUBO by introducing auxiliary variables, with penalty strength $M = 2\max_{\lvert S\rvert>2}\lvert c_S\rvert$. Supports both BINARY and SPIN variable types.
 
-**Lagrange multipliers.** One-hot and domain-wall use per-register MOMC penalties $\lambda_i = W_c/\gamma$ (bit-flip objective gain over minimum infeasible penalty), avoiding the dynamic-range inflation of a single global $\alpha\cdot\max_{S,\boldsymbol{c}}\lvert C_{S;\boldsymbol{c}}\rvert$ constant.
+**Lagrange multipliers.** One-hot and domain-wall use per-register MOMC penalties $\lambda_i = W_c/\gamma$ (bit-flip objective gain over minimum infeasible penalty), avoiding the dynamic-range inflation typical of a single global $\alpha\cdot\max_{S,\boldsymbol{c}}\lvert C_{S;\boldsymbol{c}}\rvert$ constant.
 
-For EB, AB, and TB, two choice-to-bitstring assignment strategies are available: the **naive** canonical binary-order assignment, and the **enhanced** assignment (Boltzmann-average-sorted choices with Gray-code bitstrings, plus linearly-independent prioritization for AB).
+For EB, AB, and TB, we test two combinations of choice/bitstring order heuristics: the **naive** canonical binary-order assignment, and the **enhanced** assignment (Boltzmann-average-sorted choices with Gray-code bitstrings, plus linearly-independent prioritization for AB), though combinations are possible.
 
 ## Usage
 
@@ -88,14 +88,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-On Windows with Visual Studio Build Tools:
-
-```powershell
-cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release
-```
-
-This produces the `encode_cfn` binary (`build/encode_cfn`, or `build/Release/encode_cfn` on multi-config generators).
+This produces the `encode_cfn` binary (`build/encode_cfn`).
 
 ### Testing
 
@@ -121,12 +114,12 @@ Required:
   --encoding NAME        one_hot | domain_wall | exact_binary | approximate_binary | truncated_binary
 
 Encoding options:
-  --choice-ordering      unsorted | one_variable | boltzmann      (default: unsorted)
-  --bitstring-ordering   natural | gray                           (default: natural)
+  --choice-ordering      unsorted | one_variable | boltzmann       (default: unsorted)
+  --bitstring-ordering   natural | gray                            (default: natural)
   --weighted-ls          Enable weighted least squares             (AB only)
   --li-prioritization    Enable LI prioritization                  (AB only)
   --nonlinear-refinement Enable nonlinear refinement               (AB only)
-  --quadratize           Apply Rosenberg quadratization            (EB/TB only)
+  --quadratize           Apply Rosenberg quadratization            (EB/AB/TB only)
   --k-approx N           Max AB interaction degree                 (default: 2)
   --k-trunc N            Walsh truncation order                    (default: 2)
   --epsilon FLOAT        Lagrange multiplier margin                (default: 0.1)
@@ -210,9 +203,9 @@ Costs are flattened row-major with the rightmost scope variable varying fastest.
 }
 ```
 
-Term keys are comma-separated qubit indices, so a term of degree $k$ contributes $c_S \prod_{q\in S} b_q$. This format is directly consumable by D-Wave samplers and by [`../solver_tools`](../solver_tools). Sample outputs are in [`test_output/`](test_output).
+Term keys are comma-separated qubit indices, so a term of degree $k$ contributes $c_S \prod_{q\in S} b_q$. This format is directly consumable the solvers and solver interfaces in [`../solver_tools`](../solver_tools). Sample outputs are in [`test_output/`](test_output).
 
-**CSV metrics.** One row per encoded CFN, with columns covering: instance metadata, encoding configuration, qubit counts, term statistics by degree, coefficient statistics, Lagrange-multiplier and Rosenberg-penalty information, approximation quality ($L^2$/$L^\infty$ error, spectral profile $P_k=\sum_{\lvert S\rvert=k}\widehat{H}_S^2$), per-phase timing, and variable type.
+**CSV metrics.** One row per encoded CFN, with columns covering: instance metadata, encoding configuration, qubit counts, term statistics by degree, coefficient statistics, Lagrange-multiplier and Rosenberg-penalty information, approximation quality ($L^2$/$L^\infty$ error, spectral profile $P_k=\sum_{\lvert S\rvert=k}\widehat{H}_S^2$), per-encoding-phase timing, and variable type.
 
 **Python converter.** [`python/dimod_converter.py`](python/dimod_converter.py) loads the JSON output into Python objects for use with D-Wave's `dimod` library:
 
