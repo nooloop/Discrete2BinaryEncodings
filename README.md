@@ -9,7 +9,7 @@ This repository provides the evaluation pipeline for five binary-variable encodi
 A CFN over $N$ discrete variables $\vec{d}=(d_1,\dots,d_N)$ of cardinalities $\lvert d_1\rvert,\dots,\lvert d_N\rvert$ has the indicator-form objective:
 
 $$
-H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \; \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i},
+H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i},
 \qquad x_{i,c_i}\in\{0,1\}
 $$
 
@@ -71,7 +71,7 @@ The benchmark proceeds in four stages: generate a common dataset, encode each in
 [`benchmarking_dataset/`](benchmarking_dataset) generates synthetic, pairwise-decomposable CFNs stratified across four axes (variable count $N$, cardinality $\lvert d\rvert=2^{D}$, edge density $\rho$, and coefficient distribution $R$) with $P=5$ independent draws per setting, for:
 
 $$
-\lvert\mathcal{N}\rvert \times \lvert\mathcal{D}\rvert \times \lvert\boldsymbol{\rho}\rvert \times \lvert\mathcal{R}\rvert \times P \;=\; 10 \times 8 \times 9 \times 4 \times 5 \;=\; 14{,}400
+\lvert\mathcal{N}\rvert \times \lvert\mathcal{D}\rvert \times \lvert\boldsymbol{\rho}\rvert \times \lvert\mathcal{R}\rvert \times P =10 \times 8 \times 9 \times 4 \times 5 =14{,}400
 $$
 
 instances. Cardinalities are constrained to powers of two to avoid codeword-duplication artifacts in the bit-efficient encodings, and the four distributions (uniform, Gaussian, exponential, Laplace) span bounded/unbounded and light-/heavy-tailed regimes. Every coefficient is drawn from a fixed, reproducible seed (`20260512`). [Toulbar2](https://github.com/toulbar2/toulbar2) is run on every instance to produce reference ground states $E_{\text{GS}}$, against which all solvers are scored. See [`benchmarking_dataset/README.md`](benchmarking_dataset/README.md).
