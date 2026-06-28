@@ -35,7 +35,11 @@ inline std::string csv_header() {
         "total_runtime_s,"
         "mean_time_per_run_s,"
         "best_solution,"
-        "per_run_energies";
+        "per_run_energies,"
+        "best_cfn_energy,"
+        "num_feasible,"
+        "num_best_cfn,"
+        "best_cfn_solution";
 }
 
 inline std::string format_solution(const std::vector<int>& sol) {
@@ -93,6 +97,17 @@ inline std::string csv_row(const AggregateResult& r) {
         ss << r.per_run_energies[k];
     }
     ss << "]\"";
+
+    // --- Decoded-CFN columns (appended) ---
+    ss << ",";
+    if (std::isnan(r.best_cfn_energy)) ss << "NA";
+    else                               ss << r.best_cfn_energy;
+    ss << ",";
+    if (r.num_feasible < 0) ss << "NA"; else ss << r.num_feasible;
+    ss << ",";
+    if (r.num_best_cfn < 0) ss << "NA"; else ss << r.num_best_cfn;
+    ss << ",";
+    ss << format_solution(r.best_cfn_solution);
 
     return ss.str();
 }

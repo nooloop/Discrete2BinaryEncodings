@@ -10,6 +10,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 // ============================================================================
 // CLI usage
@@ -20,6 +21,10 @@ void print_usage(const char* prog) {
         << "\nRequired:\n"
         << "  --mode MODE             cfn | binary\n"
         << "  --input FILE            Path to .cfn or encoded .json file\n"
+        << "\nDecoding (binary mode):\n"
+        << "  --cfn-dir DIR           Dir with source .cfn files; enables decoding the\n"
+        << "                          best state to CFN choices and recording\n"
+        << "                          best_cfn_energy / num_feasible / num_best_cfn\n"
         << "\nAnnealing schedule:\n"
         << "  --schedule TYPE         geometric | linear           (default: geometric)\n"
         << "  --T-start FLOAT         Starting temperature         (default: 10.0)\n"
@@ -55,6 +60,7 @@ SAParams parse_args(int argc, char** argv, bool& header_only) {
 
         if      (a == "--mode")             params.mode = next();
         else if (a == "--input")            params.input_path = next();
+        else if (a == "--cfn-dir")          params.cfn_dir = next();
         else if (a == "--schedule")         params.schedule = next();
         else if (a == "--T-start")          params.T_start = std::stod(next());
         else if (a == "--T-end")            params.T_end = std::stod(next());
@@ -106,6 +112,12 @@ int main(int argc, char** argv) {
         std::vector<RunResult> runs;
         AggregateResult agg;
 
+        // Decoded-CFN aggregates (filled by both modes below).
+        double cfn_best_energy = std::numeric_limits<double>::quiet_NaN();
+        int    cfn_num_feasible = -1;   // -1 => not computed
+        int    cfn_num_best     = -1;
+        std::vector<int> cfn_best_solution;
+
         std::string filename = path_basename(params.input_path);
 
         if (params.mode == "binary") {
@@ -149,6 +161,48 @@ int main(int argc, char** argv) {
             agg.max_cardinality = model.source_max_cardinality;
             agg.edge_density    = model.meta.valid ? model.meta.rho : 0;
             agg.distribution    = model.meta.valid ? model.meta.dist : "NA";
+
+            // Decode each run's best state to CFN choices and evaluate the
+            // source CFN. decode_to_cfn inverts both natural (naive) and
+            // Gray/Boltzmann (enhanced) layouts via the model's
+            // choice_to_bitstring map, so best_cfn_energy is the true CFN cost
+            // of the best decoded solution regardless of bitstring ordering.
+            if (!params.cfn_dir.empty()) {
+                if (model.source_cfn.empty()) {
+                    std::cerr << "Warning: --cfn-dir set but model has no "
+                                 "source_cfn; skipping CFN decode.\n";
+                } else {
+                    std::string cfn_file = model.source_cfn;
+                    if (cfn_file.size() < 4 ||
+                        cfn_file.substr(cfn_file.size() - 4) != ".cfn")
+                        cfn_file += ".cfn";
+                    std::string cfn_path = params.cfn_dir + "/" + cfn_file;
+                    try {
+                        CFNModel src = parse_cfn_for_sa(cfn_path);
+                        cfn_num_feasible = 0;
+                        cfn_num_best     = 0;
+                        double best = std::numeric_limits<double>::infinity();
+                        for (const auto& rr : runs) {
+                            std::vector<int> ch = decode_to_cfn(model, rr.best_state);
+                            if (ch.empty()) continue;   // infeasible decode
+                            cfn_num_feasible++;
+                            double ce = compute_energy(src, ch);
+                            if (ce < best - params.tolerance) {
+                                best = ce;
+                                cfn_best_solution = ch;
+                                cfn_num_best = 1;
+                            } else if (std::abs(ce - best) <= params.tolerance) {
+                                cfn_num_best++;
+                            }
+                        }
+                        if (cfn_num_feasible > 0) cfn_best_energy = best;
+                    } catch (const std::exception& e) {
+                        std::cerr << "Warning: could not load source CFN '"
+                                  << cfn_path << "': " << e.what()
+                                  << " (skipping CFN decode).\n";
+                    }
+                }
+            }
         }
         else {
             CFNModel model = parse_cfn_for_sa(params.input_path);
@@ -192,6 +246,24 @@ int main(int argc, char** argv) {
             agg.max_cardinality = max_card;
             agg.edge_density    = density;
             agg.distribution    = model.meta.valid ? model.meta.dist : "NA";
+
+            // CFN mode: states already are choices and best_energy already is
+            // the CFN cost, so best_cfn_energy mirrors the native result.
+            cfn_num_feasible = 0;
+            cfn_num_best     = 0;
+            double best = std::numeric_limits<double>::infinity();
+            for (const auto& rr : runs) {
+                cfn_num_feasible++;
+                double ce = rr.best_energy;
+                if (ce < best - params.tolerance) {
+                    best = ce;
+                    cfn_best_solution = rr.best_state;
+                    cfn_num_best = 1;
+                } else if (std::abs(ce - best) <= params.tolerance) {
+                    cfn_num_best++;
+                }
+            }
+            cfn_best_energy = best;
         }
 
         double total_time = total_timer.elapsed();
@@ -213,6 +285,11 @@ int main(int argc, char** argv) {
         agg.mean_time_per_run_s   = stats.mean_time_per_run_s;
         agg.per_run_energies      = stats.per_run_energies;
         agg.best_solution         = stats.best_solution;
+
+        agg.best_cfn_energy       = cfn_best_energy;
+        agg.num_feasible          = cfn_num_feasible;
+        agg.num_best_cfn          = cfn_num_best;
+        agg.best_cfn_solution     = cfn_best_solution;
 
         if (!std::isnan(params.ground_truth)) {
             agg.num_optimal = 0;

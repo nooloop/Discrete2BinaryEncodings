@@ -50,6 +50,8 @@ inline double temperature_linear(double T_start, double T_end,
 struct SAParams {
     std::string mode;                       // "cfn" or "binary"
     std::string input_path;
+    std::string cfn_dir;                    // dir with source .cfn files (binary mode:
+                                            // enables decode + best_cfn_energy output)
     std::string schedule    = "geometric";  // "geometric" or "linear"
     std::string move_type   = "flip";       // "flip", "shift", "both" (CFN only)
     double T_start          = 10.0;
@@ -160,7 +162,17 @@ struct AggregateResult {
     double mean_time_per_run_s = 0;
 
     std::vector<double> per_run_energies;
-    std::vector<int> best_solution;   // best state across all runs
+    std::vector<int> best_solution;   // best state across all runs (raw)
+
+    // --- Decoded-CFN results (binary mode: decode best_state per run via
+    //     decode_to_cfn and evaluate the source CFN; cfn mode: native energy).
+    //     best_cfn_energy stays NaN when no source CFN is available or no run
+    //     decoded feasibly. Decoding honours natural (naive) and Gray/Boltzmann
+    //     (enhanced) layouts through the model's choice_to_bitstring map. ---
+    double best_cfn_energy = std::numeric_limits<double>::quiet_NaN();
+    int    num_feasible    = -1;   // -1 => not computed (no source CFN)
+    int    num_best_cfn    = -1;
+    std::vector<int> best_cfn_solution;   // decoded CFN choices at best_cfn_energy
 };
 
 inline AggregateResult aggregate_runs(const std::vector<RunResult>& runs,

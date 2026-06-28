@@ -609,6 +609,77 @@ static void test_enhanced_binary_decode() {
 }
 
 // ============================================================================
+// Test: SA + decode recovers the CFN optimum for an ENHANCED model
+//
+// Builds a 2-var cardinality-2 CFN and a cost-preserving exact_binary model
+// under a PERMUTED (enhanced-style) assignment, so the binary minimum decodes
+// to the CFN optimum only when choice_to_bitstring is inverted. This exercises
+// the same SA->decode->CFN-eval path solve_sa now uses for best_cfn_energy.
+// Coefficients are derived by the Mobius transform of the decoded-cost table,
+// so the model is cost-preserving by construction (no hand-tuned arithmetic).
+// ============================================================================
+static void test_sa_decode_enhanced_optimum() {
+    std::cout << "\n=== Enhanced SA Decode -> CFN Optimum ===\n";
+
+    CFNModel cfn;
+    cfn.name = "enh_cp"; cfn.num_variables = 2; cfn.var_names = {"x0", "x1"};
+    cfn.cardinalities = {2, 2};
+    cfn.unary = {{1.0, -2.0}, {0.5, 0.5}};
+    CFNModel::PairwiseTable pt; pt.vi = 0; pt.vj = 1; pt.di = 2; pt.dj = 2;
+    pt.costs = {0.0, 3.0, 3.0, 0.0};               // favours c0 == c1
+    cfn.pairwise.push_back(pt); cfn.build_adjacency();
+    GroundState gs = brute_force_cfn(cfn);          // optimum: [1,1], E = -1.5
+
+    // Enhanced assignment: var0 swapped (choice0->bs1, choice1->bs0); var1 natural.
+    std::vector<std::vector<int>> c2b = {{1, 0}, {0, 1}};
+    auto choice_of = [&](int var, int bs) {
+        for (int c = 0; c < 2; c++) if (c2b[var][c] == bs) return c; return -1;
+    };
+    // Decoded-cost table f(b0,b1) and its multilinear (Mobius) coefficients.
+    auto fval = [&](int b0, int b1) {
+        return eval_cfn(cfn, {choice_of(0, b0), choice_of(1, b1)});
+    };
+    double f00 = fval(0,0), f10 = fval(1,0), f01 = fval(0,1), f11 = fval(1,1);
+    double cst = f00, a = f10 - f00, c = f01 - f00, d = f11 - f10 - f01 + f00;
+
+    nlohmann::json j;
+    j["encoding"] = "exact_binary"; j["variable_type"] = "BINARY";
+    j["num_logical_qubits"] = 2; j["num_auxiliary_qubits"] = 0;
+    j["offset"] = cst; j["source_cfn"] = "enh_cp";
+    nlohmann::json terms = nlohmann::json::object();
+    if (std::abs(a) > 1e-12) terms["0"]   = a;     // qubit0 = var0 bit0
+    if (std::abs(c) > 1e-12) terms["1"]   = c;     // qubit1 = var1 bit0
+    if (std::abs(d) > 1e-12) terms["0,1"] = d;
+    j["terms"] = terms;
+    nlohmann::json qm = nlohmann::json::object();
+    qm["0"] = {{"variable",0},{"bit",0},{"variable_name","x0"}};
+    qm["1"] = {{"variable",1},{"bit",0},{"variable_name","x1"}};
+    j["qubit_map"] = qm;
+    j["choice_to_bitstring"] = c2b;
+
+    BinaryModel model = parse_model_str(j.dump());
+    SAParams p = test_params();
+    auto res = run_binary_test(model, cfn, p);
+
+    std::cout << "  enhanced exact_binary: encoded_E=" << res.best_encoded_energy
+              << "  cfn_E=" << res.cfn_energy << "  sol=" << fmt(res.cfn_choices)
+              << "  (gs=" << gs.energy << " at " << fmt(gs.assignment) << ")\n";
+
+    APPROX_EQ(res.best_encoded_energy, gs.energy, 1e-6);   // cost-preserving
+    CHECK(!res.cfn_choices.empty());
+    APPROX_EQ(res.cfn_energy, gs.energy, 1e-6);            // decode -> optimum
+    CHECK(res.cfn_choices == gs.assignment);
+
+    // A naive decode (field stripped) would mis-decode the same binary minimum.
+    nlohmann::json j2 = j; j2.erase("choice_to_bitstring");
+    BinaryModel naive = parse_model_str(j2.dump());
+    auto res2 = run_binary_test(naive, cfn, p);
+    CHECK(res2.cfn_choices != gs.assignment);
+    std::cout << "  (naive decode of same model -> " << fmt(res2.cfn_choices)
+              << ", correctly flagged as wrong)\n";
+}
+
+// ============================================================================
 // Main test driver
 // ============================================================================
 int main() {
@@ -641,6 +712,7 @@ int main() {
 
     // ------- Enhanced (Gray / Boltzmann / LI) decode -------
     test_enhanced_binary_decode();
+    test_sa_decode_enhanced_optimum();
 
     // ------- Summary -------
     std::cout << "\n========================================\n"

@@ -19,6 +19,7 @@ TOLERANCE="1e-6"
 VERBOSE=""
 INPUT_DIR=""
 OUTPUT_CSV=""
+CFN_DIR=""
 
 usage() {
     cat <<'USAGE'
@@ -42,6 +43,8 @@ Optional:
   --jobs N              Parallel jobs                   (default: 32)
   --ground-truth E      Known optimum for success count
   --tolerance FLOAT     Tolerance for ground truth      (default: 1e-6)
+  --cfn-dir DIR         Source .cfn dir (binary mode): decode best state and
+                        record best_cfn_energy / num_feasible / num_best_cfn
   --verbose             Print progress
 USAGE
     exit 1
@@ -65,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         --jobs)             JOBS="$2";             shift 2;;
         --ground-truth)     GROUND_TRUTH="$2";     shift 2;;
         --tolerance)        TOLERANCE="$2";        shift 2;;
+        --cfn-dir)          CFN_DIR="$2";          shift 2;;
         --verbose)          VERBOSE="--verbose";   shift 1;;
         --help|-h)          usage;;
         *)                  echo "Unknown option: $1"; usage;;
@@ -121,6 +125,10 @@ fi
 
 if [[ -n "$GROUND_TRUTH" ]]; then
     SOLVER_ARGS+=(--ground-truth "$GROUND_TRUTH")
+fi
+
+if [[ -n "$CFN_DIR" ]]; then
+    SOLVER_ARGS+=(--cfn-dir "$CFN_DIR")
 fi
 
 if [[ -n "$VERBOSE" ]]; then
