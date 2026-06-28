@@ -12,6 +12,7 @@
 #include "encodings/exact_binary.hpp"
 #include "encodings/approximate_binary.hpp"
 #include "encodings/truncated_binary.hpp"
+#include "output.hpp"
 
 #include <iostream>
 #include <cmath>
@@ -599,6 +600,80 @@ static void test_orderings_differ(const CFN& cfn, const std::string& label) {
 }
 
 // ===========================================================================
+// Enhanced-encoding decode round-trip  (Section 3.4)
+//
+// Gray ordering and Boltzmann choice ordering permute the choice->bitstring
+// map, so the emitted model JSON must carry "choice_to_bitstring" for the
+// solver to invert it. This verifies, for every binary encoding:
+//   (a) the field is emitted and matches ba.assignment,
+//   (b) the per-variable assignment is an injection,
+//   (c) inverting it recovers the original choice from the register bits,
+//   (d) the layout is non-identity, i.e. a naive natural-binary decode (the
+//       old solver behaviour) would mis-decode at least one (var, choice).
+// ===========================================================================
+static void test_choice_to_bitstring_roundtrip(const CFN& cfn,
+                                                const std::string& enc,
+                                                const std::string& label) {
+    std::cerr << "[choice_to_bitstring round-trip] " << enc << " " << label << "\n";
+
+    EncodingParams params;
+    params.encoding           = enc;
+    params.choice_ordering    = "boltzmann";
+    params.bitstring_ordering = "gray";
+    params.temperature        = 1.0;
+    params.k_approx           = 2;
+    params.k_trunc            = 2;
+
+    BitstringAssignment ba = compute_assignment(cfn, params);
+
+    EncodingResult res;
+    if (enc == "exact_binary")            res = encode_exact_binary(cfn, ba, params);
+    else if (enc == "approximate_binary") res = encode_approximate_binary(cfn, ba, params);
+    else                                  res = encode_truncated_binary(cfn, ba, params);
+    // Production wiring (main.cpp) records the assignment on the result; mirror it.
+    res.choice_to_bitstring = ba.assignment;
+
+    // (a) JSON carries the field and it matches ba.assignment exactly.
+    auto j = build_model_json(res, cfn, params);
+    check(j.contains("choice_to_bitstring"),
+          label + " " + enc + " emits choice_to_bitstring");
+    if (j.contains("choice_to_bitstring")) {
+        auto c2b = j["choice_to_bitstring"];
+        bool matches = ((int)c2b.size() == cfn.num_variables);
+        for (int i = 0; i < cfn.num_variables && matches; i++) {
+            if ((int)c2b[i].size() != cfn.cardinalities[i]) { matches = false; break; }
+            for (int c = 0; c < cfn.cardinalities[i]; c++)
+                if (c2b[i][c].get<int>() != ba.assignment[i][c]) { matches = false; break; }
+        }
+        check(matches, label + " " + enc + " field matches assignment");
+    }
+
+    // (b)+(c)+(d): build the inverse map, round-trip, and confirm non-identity.
+    bool naive_would_fail = false;
+    for (int i = 0; i < cfn.num_variables; i++) {
+        int Di = res.bits_per_var[i];
+        int total_bs = 1 << Di;
+        std::vector<int> inv(total_bs, -1);
+        for (int c = 0; c < cfn.cardinalities[i]; c++) {
+            int bs = ba.assignment[i][c];
+            check(bs >= 0 && bs < total_bs && inv[bs] == -1,
+                  label + " " + enc + " var " + std::to_string(i) + " injective");
+            inv[bs] = c;
+        }
+        for (int c = 0; c < cfn.cardinalities[i]; c++) {
+            int bs = ba.assignment[i][c];
+            check(inv[bs] == c,
+                  label + " " + enc + " var " + std::to_string(i) +
+                  " round-trips choice " + std::to_string(c));
+            if (bs != c) naive_would_fail = true;  // raw register int != choice
+        }
+    }
+    check(naive_would_fail,
+          label + " " + enc +
+          " enhanced layout is non-identity (naive decode would be wrong)");
+}
+
+// ===========================================================================
 // Approximate-binary nonlinear refinement tests  (Appendix A.4, Eq. 44)
 //
 // The NL refinement minimises a Boltzmann probability-matching loss:
@@ -788,6 +863,13 @@ int main() {
     test_orderings_differ(cfn3, "CFN3 [4,3]");
     test_orderings_eb(cfn1, "CFN1 [3,2]");
     test_orderings_eb(cfn3, "CFN3 [4,3]");
+
+    std::cerr << "\n=== Enhanced Decode Round-Trip (choice_to_bitstring) ===\n";
+    for (const std::string& enc :
+         {"exact_binary", "approximate_binary", "truncated_binary"}) {
+        test_choice_to_bitstring_roundtrip(cfn1, enc, "CFN1 [3,2]");
+        test_choice_to_bitstring_roundtrip(cfn3, enc, "CFN3 [4,3]");
+    }
 
     std::cerr << "\n=== Nonlinear Refinement Tests ===\n";
     test_nonlinear_refinement_ab(cfn_nl, "CFN_NL [5]");

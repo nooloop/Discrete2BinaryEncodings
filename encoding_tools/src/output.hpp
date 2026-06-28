@@ -167,6 +167,18 @@ inline nlohmann::json build_model_json(const EncodingResult& res,
     }
     j["qubit_map"] = qmap;
 
+    // Choice -> bitstring assignment (binary encodings only). Without this,
+    // the decoder cannot invert Gray / Boltzmann / LI-prioritized layouts and
+    // falls back to natural-binary decoding, which yields wrong CFN choices for
+    // the enhanced encodings. Element i is the per-choice bitstring list for
+    // variable i: choice_to_bitstring[i][c] = integer bitstring of choice c.
+    if (!res.choice_to_bitstring.empty()) {
+        nlohmann::json cb = nlohmann::json::array();
+        for (const auto& var_assign : res.choice_to_bitstring)
+            cb.push_back(var_assign);
+        j["choice_to_bitstring"] = cb;
+    }
+
     // Terms in D-Wave-compatible format
     nlohmann::json terms = nlohmann::json::object();
     auto sorted = res.poly.sorted_terms();

@@ -184,6 +184,10 @@ int main(int argc, char** argv) {
                 }
 
                 result.time_bitstring_assignment = t_assign;
+
+                // Record the choice->bitstring assignment so the decoder can
+                // invert Gray / Boltzmann / LI-prioritized layouts.
+                result.choice_to_bitstring = ba.assignment;
             }
             else {
                 std::cerr << "Unknown encoding: " << args.params.encoding << "\n";

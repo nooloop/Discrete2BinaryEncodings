@@ -222,6 +222,15 @@ struct EncodingResult {
     std::vector<std::pair<int,int>> qubit_info;
     std::vector<int> qubit_start;  // first qubit index per variable
     std::vector<int> bits_per_var; // bits per variable
+
+    // Choice -> bitstring assignment per variable (binary encodings only;
+    // empty for one_hot / domain_wall). choice_to_bitstring[i][c] is the
+    // integer bitstring assigned to choice c of variable i. The decoder needs
+    // this to invert non-identity assignments produced by Gray ordering,
+    // Boltzmann choice ordering, and LI prioritization. Without it, decoding
+    // can only assume natural-binary (identity) layout, which is wrong for the
+    // enhanced encodings.
+    std::vector<std::vector<int>> choice_to_bitstring;
 };
 
 // ============================================================================
