@@ -1,14 +1,14 @@
 # encoding_tools
 
-High-performance C++17 tool that converts pairwise-decomposable Cost Function Networks (CFNs) in Toulbar2 JSON format into QUBO/HUBO/Ising models under five binary-variable encodings. It emits D-Wave-compatible JSON model files together with a CSV of benchmarking metrics.
+C++17 tool that converts pairwise-decomposable Cost Function Networks (CFNs) in Toulbar2 JSON format into QUBO/HUBO/Ising models under five binary-variable encodings: one-hot, domain-wall, exact-binary, approximate-binary, and truncated-binary. It produces JSON model files as output together with a CSV of benchmarking metrics (including timing information, maximum encoding degree, and number of binary variables used).
 
-Given the indicator-form CFN objective
+Given the indicator-form CFN objective:
 
 $$
-H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \; \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i},
+H_{\text{CFN}}(\vec{x}) = \sum_{\varnothing \neq S \subseteq [N]} \; \sum_{\boldsymbol{c}\in\mathcal{C}_S} C_{S;\boldsymbol{c}} \prod_{i\in S} x_{i,c_i}
 $$
 
-each encoding replaces the discrete indicator $x_{i,c_i}\in\{0,1\}$ with a specific function of binary variables, trading off bit count, interaction degree, infeasible-solution count, and approximation error.
+each encoding replaces the indicator $x_{i,c_i}\in\{0,1\}$ with a specific function of binary variables, trading off bit count, interaction degree, infeasible-solution count, and approximation error.
 
 ## Table of Contents
 
@@ -28,21 +28,21 @@ encoding_tools/
 ├── CMakeLists.txt
 ├── README.md
 ├── src/
-│   ├── main.cpp                    # CLI entry point, file discovery, encoding dispatch
+│   ├── main.cpp                    # CLI entry point
 │   ├── baseline/
 │   │   ├── types.hpp               # BinaryPolynomial, EncodingParams, EncodingResult, Timer
-│   │   └── cfn.hpp                 # CFN parser (Toulbar2 JSON)
+│   │   └── cfn.hpp                 # CFN parser
 │   ├── encodings/
 │   │   ├── one_hot.hpp             # One-hot encoding
 │   │   ├── domain_wall.hpp         # Domain-wall encoding
-│   │   ├── exact_binary.hpp        # Exact-binary encoding (indicator polynomial expansion)
-│   │   ├── approximate_binary.hpp  # Approximate-binary encoding (least-squares + refinement)
-│   │   └── truncated_binary.hpp    # Truncated-binary encoding (Walsh–Hadamard)
+│   │   ├── exact_binary.hpp        # Exact-binary encoding
+│   │   ├── approximate_binary.hpp  # Approximate-binary encoding
+│   │   └── truncated_binary.hpp    # Truncated-binary encoding
 │   ├── utilities/
 │   │   ├── lagrange.hpp            # MOMC Lagrange multiplier computation
-│   │   ├── assignment.hpp          # Choice ordering, bitstring ordering, LI prioritization
-│   │   └── rosenberg.hpp           # Rosenberg quadratization (BINARY and SPIN)
-│   └── output.hpp                  # JSON writer and CSV formatter
+│   │   ├── assignment.hpp          # Choice ordering and bitstring ordering
+│   │   └── rosenberg.hpp           # Rosenberg quadratization
+│   └── output.hpp                  # JSON and CSV writers
 ├── python/
 │   └── dimod_converter.py          # Load JSON models into dimod objects
 ├── tests/
@@ -61,21 +61,21 @@ encoding_tools/
 | **Approximate-binary (AB)** | $\lceil\log_2\lvert d_i\rvert\rceil$ | BINARY $\{0,1\}$ | $k_{\text{approx}}$ (default $2$, QUBO) |
 | **Truncated-binary (TB)** | $\lceil\log_2\lvert d_i\rvert\rceil$ | SPIN $\{-1,+1\}$ | $k_{\text{trunc}}$ (default $2$, QUBO) |
 
-**One-hot.** Each choice $c$ of variable $i$ is represented by a dedicated binary variable $b_{i,c}$. Feasibility (exactly one bit set per register) is enforced by a MOMC Lagrange penalty $\lambda_{\text{OH}}\sum_i\big(\sum_{c} b_{i,c} - 1\big)^2$.
+- **One-hot.** Each choice $c_i$ of variable $i$ is represented by $x_{i,c_i}=b_{i,c_i}$. Feasibility (exactly one bit set per register) is enforced by a Lagrange penalty $\lambda_{\text{OH}}\sum_i\big(\sum_{c_i} b_{i,c_i} - 1\big)^2$, where $\lambda_{\text{OH}}$ is set by the MOMC method of [Ayodele, 2022](https://doi.org/10.1007/978-3-031-04148-8_11). 
 
-**Domain-wall.** Variable $i$ uses $\lvert d_i\rvert - 1$ ordered bits. The choice indicator is $x_{i,c} = b_{i,c-1} - b_{i,c}$ with boundary conditions $b_{i,-1}=1$ and $b_{i,\lvert d_i\rvert-1}=0$. A MOMC Lagrange penalty enforces a single $\mathtt{1\!\to\!0}$ domain wall per register.
+- **Domain-wall.** Each choice $c_i$ of Variable $i$ is represented by $x_{i,c} = b_{i,c_i-1} - b_{i,c_i}$ with boundary conditions $b_{i,-1}=1$ and $b_{i,\lvert d_i\rvert-1}=0$. A MOMC Lagrange penalty enforces a single $\mathtt{1\!\to\!0}$ domain wall per register by way of $\lambda_{DW}\sum_i\sum_{c_i}\left(b_{i,c_i}-b_{i,c_i}b_{i,c_i-1}\right)$, where $\lambda_{\text{DW}}$ is set by the MOMC method of [Ayodele, 2022](https://doi.org/10.1007/978-3-031-04148-8_11). 
 
-**Exact-binary.** Variable $i$ is encoded in $D_i=\lceil\log_2\lvert d_i\rvert\rceil$ bits, with each choice assigned a unique bitstring $r^{(c)}$. The indicator expands by inclusion–exclusion as $x_{i,c}\mapsto \prod_{q=0}^{D_i-1}\big(b_{i,q}r^{(c)}_q + (1-b_{i,q})(1-r^{(c)}_q)\big)$. Exact, but generally HUBO. Unused bitstrings are padded with the lowest-energy choice.
+- **Exact-binary.** Variable $i$ is encoded in $D_i=\lceil\log_2\lvert d_i\rvert\rceil$ bits, with each choice assigned a unique bitstring $r^{(c_i)}$. The indicator expands by inclusion–exclusion as $x_{i,c}\mapsto \prod_{q=0}^{D_i-1}\big(b_{i,q}r^{(c)}_q + (1-b_{i,q})(1-r^{(c)}_q)\big)$. Unused bitstrings are padded with the lowest-energy choice. This encoding generally produces HUBOs, but can be quadratized to QUBOs (see below).
 
-**Approximate-binary.** Same bits as exact-binary, but coefficients are fit by least squares onto a degree-$\le k_{\text{approx}}$ monomial basis: $\vec{B}=\mathbf{Q}^{\dagger}\vec{E}$ via the Moore–Penrose pseudoinverse. This eliminates infeasible solutions and Lagrange multipliers while bounding interaction degree, at the cost of bounded approximation error. Optional heuristics: choice ordering, bitstring ordering, weighted least squares, LI prioritization, and nonlinear refinement.
+- **Approximate-binary.** Same bit-count as exact-binary, but coefficients are fit by least squares onto a degree-$\le k_{\text{approx}}$ monomial basis via the Moore–Penrose pseudoinverse. This eliminates infeasible solutions and Lagrange multipliers while bounding interaction degree, at the cost of bounded approximation error. Optional heuristics include: choice ordering, bitstring ordering, weighted least squares, linearly-indenpendent matrix row prioritization, and nonlinear gradient-descent refinement.
 
-**Truncated-binary.** A Walsh–Hadamard spectral decomposition in the Ising spin basis, $H_{\text{EB}}(\vec{b})=\sum_{S}\widehat{H}_S\,\chi_S(\vec{b})$ with $\chi_S(\vec{b})=\prod_{q\in S}(1-2b_q)$, truncated at Walsh degree $k_{\text{trunc}}$. Pairwise tables are centered (marginals absorbed into unary tables) before transformation to reduce spectral leakage.
+- **Truncated-binary.** A Walsh–Hadamard spectral decomposition of the exact-binary encoding in the Ising spin basis, $H_{\text{EB}}(\vec{b})=\sum_{S}\widehat{H}_S\,\chi_S(\vec{b})$ with $\chi_S(\vec{b})=\prod_{q\in S}(1-2b_q)$, truncated at a user-defined Walsh degree $k_{\text{trunc}}$. This encoding uses the same number of bits as both the exact-binary and approximate-binary encodings, but has a user-defined degree, which if higher than QUBO can be quadratized.
 
 **Rosenberg quadratization.** Optional post-processing that reduces any HUBO to a QUBO by introducing auxiliary variables, with penalty strength $M = 2\max_{\lvert S\rvert>2}\lvert c_S\rvert$. Supports both BINARY and SPIN variable types.
 
-**Lagrange multipliers.** One-hot and domain-wall use per-register MOMC penalties $\lambda_i = W_c/\gamma$ (bit-flip objective gain over minimum infeasible penalty), avoiding the dynamic-range inflation of a single global $\alpha\cdot\max_{S,\boldsymbol{c}}\lvert C_{S;\boldsymbol{c}}\rvert$ constant.
+**Lagrange multipliers.** One-hot and domain-wall use per-register MOMC penalties $\lambda_i = W_c/\gamma$ (bit-flip objective gain over minimum infeasible penalty), avoiding the dynamic-range inflation typical of a single global $\alpha\cdot\max_{S,\boldsymbol{c}}\lvert C_{S;\boldsymbol{c}}\rvert$ constant.
 
-For EB, AB, and TB, two choice-to-bitstring assignment strategies are available: the **naive** canonical binary-order assignment, and the **enhanced** assignment (Boltzmann-average-sorted choices with Gray-code bitstrings, plus linearly-independent prioritization for AB).
+For EB, AB, and TB, we test two combinations of choice/bitstring order heuristics: the **naive** canonical binary-order assignment, and the **enhanced** assignment (Boltzmann-average-sorted choices with Gray-code bitstrings, plus linearly-independent prioritization for AB), though combinations are possible.
 
 ## Usage
 
@@ -88,14 +88,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-On Windows with Visual Studio Build Tools:
-
-```powershell
-cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release
-```
-
-This produces the `encode_cfn` binary (`build/encode_cfn`, or `build/Release/encode_cfn` on multi-config generators).
+This produces the `encode_cfn` binary (`build/encode_cfn`).
 
 ### Testing
 
@@ -121,12 +114,12 @@ Required:
   --encoding NAME        one_hot | domain_wall | exact_binary | approximate_binary | truncated_binary
 
 Encoding options:
-  --choice-ordering      unsorted | one_variable | boltzmann      (default: unsorted)
-  --bitstring-ordering   natural | gray                           (default: natural)
+  --choice-ordering      unsorted | one_variable | boltzmann       (default: unsorted)
+  --bitstring-ordering   natural | gray                            (default: natural)
   --weighted-ls          Enable weighted least squares             (AB only)
   --li-prioritization    Enable LI prioritization                  (AB only)
   --nonlinear-refinement Enable nonlinear refinement               (AB only)
-  --quadratize           Apply Rosenberg quadratization            (EB/TB only)
+  --quadratize           Apply Rosenberg quadratization            (EB/AB/TB only)
   --k-approx N           Max AB interaction degree                 (default: 2)
   --k-trunc N            Walsh truncation order                    (default: 2)
   --epsilon FLOAT        Lagrange multiplier margin                (default: 0.1)
@@ -210,9 +203,9 @@ Costs are flattened row-major with the rightmost scope variable varying fastest.
 }
 ```
 
-Term keys are comma-separated qubit indices, so a term of degree $k$ contributes $c_S \prod_{q\in S} b_q$. This format is directly consumable by D-Wave samplers and by [`../solver_tools`](../solver_tools). Sample outputs are in [`test_output/`](test_output).
+Term keys are comma-separated qubit indices, so a term of degree $k$ contributes $c_S \prod_{q\in S} b_q$. This format is directly consumable the solvers and solver interfaces in [`../solver_tools`](../solver_tools). Sample outputs are in [`test_output/`](test_output).
 
-**CSV metrics.** One row per encoded CFN, with columns covering: instance metadata, encoding configuration, qubit counts, term statistics by degree, coefficient statistics, Lagrange-multiplier and Rosenberg-penalty information, approximation quality ($L^2$/$L^\infty$ error, spectral profile $P_k=\sum_{\lvert S\rvert=k}\widehat{H}_S^2$), per-phase timing, and variable type.
+**CSV metrics.** One row per encoded CFN, with columns covering: instance metadata, encoding configuration, qubit counts, term statistics by degree, coefficient statistics, Lagrange-multiplier and Rosenberg-penalty information, approximation quality, spectral profile $P_k=\sum_{\lvert S\rvert=k}\widehat{H}_S^2$, per-encoding-phase timing, and variable type.
 
 **Python converter.** [`python/dimod_converter.py`](python/dimod_converter.py) loads the JSON output into Python objects for use with D-Wave's `dimod` library:
 

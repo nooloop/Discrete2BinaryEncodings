@@ -1,8 +1,8 @@
 # solver_tools
 
-High-performance C++17 solvers for Cost Function Networks (CFNs) and their binary-encoded counterparts (QUBO/HUBO/Ising models produced by [`../encoding_tools`](../encoding_tools)). Includes simulated annealing (`solve_sa`) and D-Wave quantum annealing (`solve_qa`) with inhomogeneous transverse-field driving. Each invocation emits one CSV row per problem instance with aggregate statistics, the best solution, and per-run energies, and is designed for large-scale benchmarking via GNU parallel on multi-core Slurm clusters.
+C++17 solvers and solver interfaces for Cost Function Networks (CFNs) and their binary-encoded counterparts (QUBO/HUBO/Ising models produced by [`../encoding_tools`](../encoding_tools)). Includes simulated annealing (`solve_sa`), D-Wave quantum annealing (`solve_qa`) with inhomogeneous transverse-field driving, and IBM quantum imaginary time evolution (`solve_qite`). Each invocation produces one CSV row per problem instance with aggregate statistics, the best solution, and per-run energies.
 
-Both solvers optimize a binary polynomial of the form $H(\vec{b}) = \sum_{S} c_S \prod_{q\in S} b_q$ (or, in CFN mode, the native indicator-form objective $H_{\text{CFN}}$), seeking the configuration that matches the Toulbar2 ground state.
+All solvers optimize a binary polynomial of the form $H(\vec{b}) = \sum_{S} c_S \prod_{q\in S} b_q$ (or, in CFN mode, the native indicator-form objective $H_{\text{CFN}}$), seeking the configuration that matches the Toulbar2 ground state.
 
 ## Table of Contents
 
@@ -55,6 +55,7 @@ solver_tools/
 | **CFN** | `solve_sa` | Toulbar2 `.cfn` JSON | Integer (domain $\lvert d_i\rvert$) | flip, shift, both |
 | **Binary SA** | `solve_sa` | `encoding_tools` `.json` | BINARY $\{0,1\}$ or SPIN $\{-1,+1\}$ | single-bit flip |
 | **D-Wave QA** | `solve_qa` | `encoding_tools` `.json` (QUBO/Ising) | BINARY $\{0,1\}$ or SPIN $\{-1,+1\}$ | quantum anneal |
+| **IBM QITE** | `solve_qite` | `encoding_tools` `.json` (QUBO/HUBO/Ising) | BINARY $\{0,1\}$ or SPIN $\{-1,+1\}$ | quantum imaginary time evolution |
 
 ### Solution decoding
 
@@ -68,10 +69,6 @@ Binary solutions are decoded to CFN variable assignments using the model's `qubi
 
 For SPIN models, bits are recovered via $b = (1 - s)/2$ before reading the register.
 
-### Inhomogeneous transverse-field driving (D-Wave)
-
-`solve_qa` computes per-qubit effective fields using the $\mathcal{O}(N_i)$ recurrence of Adame et al. (2020), normalizes them to anneal offsets $(\Delta t)_i$, and maps them through the minor embedding to physical qubits, so that the $i$-th qubit experiences schedule $\{A_i(t)=A(t\pm(\Delta t)_i),\,B_i(t)=B(t\pm(\Delta t)_i)\}$. Strongly-coupled qubits are delayed; weakly-coupled qubits are advanced.
-
 ## Usage
 
 ### Building
@@ -83,10 +80,16 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-This produces `solve_sa`, `solve_qa`, `tests`, and `tests_qa`. `solve_qa` additionally requires Python 3 with [`dwave-ocean-sdk`](https://docs.ocean.dwavesys.com/) at runtime:
+This produces `solve_sa`, `solve_qa`, `solve_qite`, `tests`, and `tests_qa`. `solve_qa` additionally requires Python 3 with [`dwave-ocean-sdk`](https://docs.ocean.dwavesys.com/) at runtime:
 
 ```bash
 pip install dwave-ocean-sdk
+```
+
+and `solve_qite` additionally requites Python 3 with [`qiskit`](https://quantum.cloud.ibm.com/docs/en/guides/install-qiskit) at runtime:
+
+```bash
+pip install qiskit
 ```
 
 ### Testing
@@ -100,9 +103,15 @@ pip install dwave-ocean-sdk
 
 # QA D-Wave integration tests (all 10 encoding variants)
 ./build/tests_qa --test-dir ./tests --dwave --solver Advantage2_system1 --python ~/dwave-env/bin/python
+
+# QITE unit tests (no IBM quantum computer needed)
+./build/tests_qite --test-dir ./tests
+
+# QITE IBM integration tests (all 10 encoding variants)
+./build/tests_qite --test-dir ./tests --ibm --solver heron --python ~/ibm-env/bin/python
 ```
 
-SA tests verify ground-state recovery for all encodings on a 2-variable, 4-choice CFN. QA tests cover the full pipeline (effective fields, anneal offsets, script generation, mock D-Wave results, decoding, CFN evaluation, embedding statistics) for one-hot, domain-wall, exact-binary (quadratized), approximate-binary, truncated-binary $k=2$, and truncated-binary $k=3$ (quadratized), each in both natural/unsorted and gray/boltzmann orderings where applicable.
+SA tests verify ground-state recovery for all encodings on a 2-variable, 4-choice CFN. QA tests cover the full pipeline (effective fields, anneal offsets, script generation, mock D-Wave results, decoding, CFN evaluation, embedding statistics) for one-hot, domain-wall, exact-binary (quadratized), approximate-binary, truncated-binary $k=2$, and truncated-binary $k=3$ (quadratized), each in both natural/unsorted and gray/boltzmann orderings where applicable. Likewise, QITE tests cover the full pipeline for quantum imaginary time evolution on IBM quantum machines.
 
 ### Examples
 
@@ -182,32 +191,40 @@ solve_qa --input problem_one_hot.json --cfn-dir cfns/ \
 solve_qa --input problem_truncated_binary.json --cfn-dir cfns/ \
     --solver Advantage2_system1 --no-inhomogeneous
 ```
+#### IBM quantum imaginary time evolution (`solve_qite`)
 
-Each `solve_qa` invocation computes anneal offsets (C++), submits to D-Wave (Python), decodes bitstrings to CFN choices, evaluates them under the original CFN, and emits a CSV row. The source CFN is located via the model's `source_cfn` field in `--cfn-dir`.
+```
+solve_qite [options]
 
-#### Batch benchmarking
+Required:
+  --input FILE            Path to encoded .json model (QUBO/Ising only)
+  --cfn-dir DIR           Directory containing source .cfn files
+  --solver NAME           IBM solver name
 
-**SA (GNU parallel):** runs `solve_sa` over every file in an input directory (default 32 parallel jobs):
+IBM parameters:
+  --evolution-time FLOAT  Evolution time in microseconds     (default: 20)
+  --num-stpes INT         Number of evolution steps          (default: 100)
+  --num-reads N           Number of reads (shots)            (default: 1000)
 
-```bash
-./scripts/run_benchmark.sh \
-    --input-dir encoded/one_hot/ --output-csv results.csv \
-    --mode binary --num-runs 100 --jobs 32
+Optional:
+  --ground-truth E        Known optimum for success counting
+  --tolerance FLOAT       Tolerance for ground truth         (default: 1e-6)
+  --python CMD            Python interpreter                 (default: python3)
+  --header                Print CSV header and exit
+  --verbose               Print progress to stderr
 ```
 
-**QA (GNU parallel):** runs `solve_qa` over every encoded JSON file. Because the QPU is a shared, queued resource, the default is sequential (`--jobs 1`); increase it only to overlap embedding computation with QPU wait times:
-
 ```bash
-./scripts/run_benchmark_qa.sh \
-    --input-dir encoded/oh/ --output-csv results.csv \
-    --cfn-dir cfns/ --solver-name Advantage2_system1
+# Submit one-hot QUBO to IBM
+solve_qite --input problem_one_hot.json --cfn-dir cfns/ \
+    --solver heron --num-reads 1000
 ```
 
-[`scripts/dwave_submit_template.py`](scripts/dwave_submit_template.py) is a reference copy of the embedded D-Wave submission template (also compiled into `solve_qa`). For very large sweeps, these drivers compose with Slurm/disBatch by launching one driver per node-local shard.
+[`scripts/dwave_submit_template.py`](scripts/dwave_submit_template.py) is a reference copy of the embedded D-Wave submission template (also compiled into `solve_qa`). [`scripts/ibm_submit_template.py`](scripts/ibm_submit_template.py) is a reference copy of the embedded IBM submission template (also compiled into `solve_qite`).
 
 ### Input format
 
-Two input formats are accepted. **CFN files** (Toulbar2 JSON, for `solve_sa --mode cfn`):
+Two input formats are accepted. **CFN files** (Toulbar2 JSON, for `solve_sa --mode cfn` and `solve_qite --mode cfn`):
 
 ```json
 {
@@ -220,7 +237,7 @@ Two input formats are accepted. **CFN files** (Toulbar2 JSON, for `solve_sa --mo
 }
 ```
 
-**Encoded model files** (produced by `encoding_tools`, for `solve_sa --mode binary` and `solve_qa`):
+**Encoded model files** (produced by `encoding_tools`, for `solve_sa --mode binary`, `solve_qa`, and `solve_qite --mode binary`):
 
 ```json
 {
@@ -237,9 +254,13 @@ Two input formats are accepted. **CFN files** (Toulbar2 JSON, for `solve_sa --mo
 
 ### Output format
 
-Each solver emits one CSV row per instance. **SA CSV** (26 columns): instance metadata, SA configuration, energy statistics (best/mean/std/median), timing, decoded best solution, and per-run energies.
+Each solver emits one CSV row per instance. 
 
-**QA CSV** (44 columns): the same 26 SA-compatible columns (with `solver_mode=dwave`) plus D-Wave configuration (`solver_name`, `annealing_time_us`, `delta_max`), D-Wave timing (`inhomog_setup_time_s`, `embedding_time_s`, `qpu_access_time_us`, `qpu_sampling_time_us`, `qpu_programming_time_us`), CFN evaluation (`best_cfn_energy`, `num_feasible`, `num_best_cfn`), and embedding statistics (`emb_num_physical_qubits`, `emb_chain_length_avg/median/var`, `emb_chain_breaks_avg/median/var`).
+1. **SA CSV**: instance metadata, SA configuration, energy statistics (best/mean/std/median), timing, decoded best solution, and per-run energies.
+
+2. **QA CSV**: the same SA-compatible columns (with `solver_mode=dwave`) plus D-Wave configuration (`solver_name`, `annealing_time_us`, `delta_max`), D-Wave timing (`inhomog_setup_time_s`, `embedding_time_s`, `qpu_access_time_us`, `qpu_sampling_time_us`, `qpu_programming_time_us`), CFN evaluation (`best_cfn_energy`, `num_feasible`, `num_best_cfn`), and embedding statistics (`emb_num_physical_qubits`, `emb_chain_length_avg/median/var`, `emb_chain_breaks_avg/median/var`).
+
+3. **QITE CESV**: the same SA-compatible columns (with `solver_mode=ibm`) plus IBM configuration (`solver_name`, `annealing_time_us`, `delta_max`), IBM timing (`inhomog_setup_time_s`, `embedding_time_s`, `qpu_access_time_us`, `qpu_sampling_time_us`, `qpu_programming_time_us`), CFN evaluation (`best_cfn_energy`, `num_feasible`, `num_best_cfn`), and embedding statistics (`emb_num_physical_qubits`, `emb_chain_length_avg/median/var`, `emb_chain_breaks_avg/median/var`).
 
 These CSV rows are the inputs to the downstream analyses (time-to-solution, optimality gap, qubit/chain statistics) described in the [top-level README](../README.md#pipeline).
 
@@ -250,4 +271,4 @@ These CSV rows are the inputs to the downstream analyses (time-to-solution, opti
 | Build | C++17 compiler (GCC 7+, Clang 5+, MSVC 2017+), CMake 3.14+ |
 | JSON I/O | [nlohmann/json](https://github.com/nlohmann/json) 3.11.3 (fetched automatically) |
 | `solve_qa` runtime | Python 3 with [dwave-ocean-sdk](https://docs.ocean.dwavesys.com/) and D-Wave Leap access |
-| Batch scripts | [GNU parallel](https://www.gnu.org/software/parallel/) (optional) |
+| `solve_qite` runtime | Python 3 with [qiskit](https://quantum.cloud.ibm.com/docs/en/guides/install-qiskit) and Qiskit Runtime access |
