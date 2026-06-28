@@ -32,6 +32,14 @@ struct BinaryModel {
     std::vector<int> qubit_start;        // first qubit index per variable
     std::vector<int> bits_per_var;       // bits per variable
 
+    // Inverse choice<->bitstring assignment for binary encodings, built from
+    // the encoder's "choice_to_bitstring" field. bitstring_to_choice[i][bs] is
+    // the CFN choice that bitstring bs maps to for variable i, or -1 if that
+    // bitstring is unused (decodes as infeasible). Empty when the field is
+    // absent (older models): decoding then falls back to natural-binary, which
+    // is only correct for naive (unsorted + natural, no LI) assignments.
+    std::vector<std::vector<int>> bitstring_to_choice;
+
     // --- Flat term storage ---
     struct Term {
         std::vector<int> qubits;
@@ -112,7 +120,10 @@ inline double delta_energy(const BinaryModel& model,
 //
 //   one_hot:      choice = which bit is 1 in the register
 //   domain_wall:  choice = number of leading 1-bits
-//   *_binary:     choice = register value as integer (natural ordering)
+//   *_binary:     choice = bitstring_to_choice[i][register value] when the
+//                 encoder supplied an explicit assignment (handles Gray /
+//                 Boltzmann / LI layouts); otherwise the natural register value
+//                 (correct only for naive unsorted+natural models).
 //
 // For SPIN variables, converts s -> b = (1-s)/2 before reading.
 // Returns empty vector if decoding fails (infeasible state).
@@ -159,12 +170,27 @@ inline std::vector<int> decode_to_cfn(const BinaryModel& model,
             choices[i] = ones;
         }
         else {
-            // Binary encodings: register value = bitstring integer
+            // Binary encodings: read the register as a bitstring integer.
             int val = 0;
             for (int b = 0; b < nbits; b++)
                 val |= (reg[b] << b);
-            if (val >= model.source_max_cardinality) return {};  // out of range
-            choices[i] = val;
+
+            if (!model.bitstring_to_choice.empty() &&
+                i < static_cast<int>(model.bitstring_to_choice.size()) &&
+                !model.bitstring_to_choice[i].empty()) {
+                // Invert the encoder's explicit assignment. This is the only
+                // path that decodes Gray / Boltzmann / LI-prioritized layouts
+                // correctly; the raw integer is NOT the choice index there.
+                const std::vector<int>& inv = model.bitstring_to_choice[i];
+                if (val >= static_cast<int>(inv.size()) || inv[val] < 0)
+                    return {};   // unused bitstring -> infeasible
+                choices[i] = inv[val];
+            } else {
+                // Backward-compatible natural-binary decoding (identity
+                // assignment): correct only for naive unsorted+natural models.
+                if (val >= model.source_max_cardinality) return {};  // out of range
+                choices[i] = val;
+            }
         }
     }
     return choices;
@@ -260,6 +286,28 @@ inline BinaryModel parse_binary_model(const std::string& path) {
             model.source_max_cardinality = max_bits + 1;
         else
             model.source_max_cardinality = 1 << max_bits;
+    }
+
+    // Parse choice->bitstring assignment (if present) and precompute the
+    // inverse map used by decode_to_cfn. Must run after the qubit_map block so
+    // bits_per_var is known.
+    if (j.contains("choice_to_bitstring")) {
+        const auto& cb = j["choice_to_bitstring"];
+        int N = static_cast<int>(cb.size());
+        model.bitstring_to_choice.assign(N, {});
+        for (int i = 0; i < N; i++) {
+            int nbits = (i < static_cast<int>(model.bits_per_var.size()))
+                            ? model.bits_per_var[i] : 0;
+            int total_bs = 1 << nbits;
+            std::vector<int> inv(total_bs, -1);
+            const auto& var_assign = cb[i];
+            for (int c = 0; c < static_cast<int>(var_assign.size()); c++) {
+                int bs = var_assign[c].get<int>();
+                if (bs >= 0 && bs < total_bs)
+                    inv[bs] = c;
+            }
+            model.bitstring_to_choice[i] = std::move(inv);
+        }
     }
 
     model.meta = parse_cfn_metadata(model.source_cfn);

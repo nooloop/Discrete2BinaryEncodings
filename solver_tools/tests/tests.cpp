@@ -514,6 +514,101 @@ static void test_cost_approximate(const char* label, const char* json,
 }
 
 // ============================================================================
+// Test: enhanced binary decode (Gray / Boltzmann / LI assignments)
+//
+// The encoder emits "choice_to_bitstring" so the solver can invert non-identity
+// layouts. This builds models with a deliberately permuted assignment and
+// verifies that decode_to_cfn:
+//   (a) recovers the original choices for every register value (round-trip),
+//   (b) reports unused bitstrings as infeasible,
+//   (c) needs the field: without it, natural-binary decode mis-decodes.
+// Covered for both BINARY (exact/approximate) and SPIN (truncated) models.
+// ============================================================================
+static void test_enhanced_binary_decode() {
+    std::cout << "\n=== Enhanced Binary Decode Round-Trip ===\n";
+
+    // 2 variables, 2 bits each. Non-identity choice->bitstring maps:
+    //   var0 (cardinality 4): choices 0..3 -> bitstrings [0,1,3,2]  (Gray order)
+    //   var1 (cardinality 3): choices 0..2 -> bitstrings [2,0,1]    (Boltzmann);
+    //                         bitstring 3 is unused -> must decode infeasible.
+    std::vector<std::vector<int>> c2b = {{0, 1, 3, 2}, {2, 0, 1}};
+    std::vector<int> card = {4, 3};
+    const int starts[2] = {0, 2};   // var0 -> qubits 0,1 ; var1 -> qubits 2,3
+
+    auto build_json = [&](const std::string& encoding, bool spin,
+                          bool include_field) -> std::string {
+        nlohmann::json j;
+        j["encoding"]             = encoding;
+        j["variable_type"]        = spin ? "SPIN" : "BINARY";
+        j["num_logical_qubits"]   = 4;
+        j["num_auxiliary_qubits"] = 0;
+        j["offset"]               = 0.0;
+        j["source_cfn"]           = "enh_test";
+        j["terms"]                = nlohmann::json::object();
+        nlohmann::json qm = nlohmann::json::object();
+        qm["0"] = {{"variable", 0}, {"bit", 0}, {"variable_name", "x0"}};
+        qm["1"] = {{"variable", 0}, {"bit", 1}, {"variable_name", "x0"}};
+        qm["2"] = {{"variable", 1}, {"bit", 0}, {"variable_name", "x1"}};
+        qm["3"] = {{"variable", 1}, {"bit", 1}, {"variable_name", "x1"}};
+        j["qubit_map"] = qm;
+        if (include_field) j["choice_to_bitstring"] = c2b;
+        return j.dump();
+    };
+
+    // bit value -> raw state element (SPIN: 0->+1, 1->-1 per decode convention)
+    auto bit_to_state = [](int bit, bool spin) { return spin ? (1 - 2 * bit) : bit; };
+
+    auto state_for_choices = [&](const std::vector<int>& choices, bool spin) {
+        std::vector<int> state(4, bit_to_state(0, spin));
+        for (int i = 0; i < 2; i++) {
+            int bs = c2b[i][choices[i]];
+            for (int b = 0; b < 2; b++)
+                state[starts[i] + b] = bit_to_state((bs >> b) & 1, spin);
+        }
+        return state;
+    };
+
+    for (bool spin : {false, true}) {
+        std::string enc = spin ? "truncated_binary" : "exact_binary";
+        BinaryModel model = parse_model_str(build_json(enc, spin, true));
+        CHECK(!model.bitstring_to_choice.empty());
+
+        // (a) every choice vector round-trips through decode_to_cfn
+        bool all_ok = true;
+        for (int c0 = 0; c0 < card[0]; c0++)
+            for (int c1 = 0; c1 < card[1]; c1++) {
+                std::vector<int> choices = {c0, c1};
+                auto decoded = decode_to_cfn(model, state_for_choices(choices, spin));
+                if (decoded != choices) all_ok = false;
+            }
+        CHECK(all_ok);
+
+        // (b) unused bitstring (var1 == 11 == 3) decodes as infeasible
+        {
+            std::vector<int> state(4, bit_to_state(0, spin));
+            state[2] = bit_to_state(1, spin);
+            state[3] = bit_to_state(1, spin);
+            CHECK(decode_to_cfn(model, state).empty());
+        }
+
+        // (c) the field is what fixes it: identical bits, no field -> wrong
+        {
+            BinaryModel naive = parse_model_str(build_json(enc, spin, false));
+            CHECK(naive.bitstring_to_choice.empty());
+            std::vector<int> choices = {2, 0};  // var0 ch2->bs3, var1 ch0->bs2
+            auto state   = state_for_choices(choices, spin);
+            auto correct = decode_to_cfn(model, state);
+            auto wrong   = decode_to_cfn(naive, state);
+            CHECK(correct == choices);
+            CHECK(wrong != choices);            // natural-binary decode mis-decodes
+        }
+
+        std::cout << "  " << enc << (spin ? " (SPIN)  " : " (BINARY)")
+                  << ": round-trip OK\n";
+    }
+}
+
+// ============================================================================
 // Main test driver
 // ============================================================================
 int main() {
@@ -543,6 +638,9 @@ int main() {
     test_cost_approximate("trunc_binary_k2  ", JSON_TRUNCATED_K2, cfn, gs);
     test_cost_approximate("trunc_binary_k3  ", JSON_TRUNCATED_K3, cfn, gs);
     test_cost_approximate("trunc_binary_k3_q", JSON_TRUNCATED_K3_QUAD, cfn, gs);
+
+    // ------- Enhanced (Gray / Boltzmann / LI) decode -------
+    test_enhanced_binary_decode();
 
     // ------- Summary -------
     std::cout << "\n========================================\n"
