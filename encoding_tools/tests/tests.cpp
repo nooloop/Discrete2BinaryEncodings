@@ -220,6 +220,28 @@ static CFN make_cfn3() {
     return cfn;
 }
 
+// CFN 4: 2 variables, cardinalities [8, 5], 1 pairwise table.
+// Cardinality 8 -> 3 bits, cardinality 5 -> 3 bits. truncated_binary at
+// k_trunc=3 keeps cubic Walsh terms (unary and cross-register), producing a
+// genuine degree-3 SPIN HUBO that exercises the (SPIN) Rosenberg path.
+static CFN make_cfn4() {
+    CFN cfn;
+    cfn.name = "test4";
+    cfn.filename = "test4.cfn";
+    cfn.num_variables = 2;
+    cfn.var_names = {"x0", "x1"};
+    cfn.cardinalities = {8, 5};
+    cfn.unary_tables.resize(2);
+    cfn.unary_tables[0] = {{0}, {3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0}};
+    cfn.unary_tables[1] = {{1}, {2.5, 0.5, 1.5, 3.5, 2.0}};
+    std::vector<double> pw;
+    for (int a = 0; a < 8; a++)
+        for (int b = 0; b < 5; b++)
+            pw.push_back(((a * 7 + b * 3) % 11) - 5.0);
+    cfn.pairwise_tables.push_back({{0, 1}, pw});
+    return cfn;
+}
+
 // CFN for NL refinement: single variable, cardinality 5, large cost spread.
 // D_i = 3 bits, so AB at k_approx=2 is approximate (8 rows, 7 columns, 1 residual DOF).
 static CFN make_cfn_nl() {
@@ -439,6 +461,93 @@ static void test_quadratization_eb(const CFN& cfn, const std::string& label) {
                 all_bits[num_logical + a] = (int)((amask >> a) & 1);
             double e = evaluate(qr.poly, all_bits);
             min_qubo = std::min(min_qubo, e);
+        }
+
+        std::ostringstream msg;
+        msg << "choices=(";
+        for (int i = 0; i < (int)choices.size(); i++) {
+            if (i) msg << ",";
+            msg << choices[i];
+        }
+        msg << ") hubo=" << hubo_energy << " qubo_min=" << min_qubo;
+        check(std::abs(min_qubo - hubo_energy) < TOL, msg.str());
+    });
+}
+
+// ===========================================================================
+// SPIN quadratization tests  (truncated_binary + Rosenberg)
+//
+// truncated_binary produces a SPIN (Ising) HUBO. Rosenberg reduction is only
+// valid in the BINARY basis, so quadratization converts the SPIN HUBO to a
+// BINARY QUBO. For each feasible discrete assignment we set the logical bits to
+// the assigned bitstring, evaluate the SPIN HUBO in the spin basis, and confirm
+// the minimum BINARY-QUBO energy over the auxiliaries equals it. (A regression
+// guard: the previous in-basis SPIN Rosenberg failed this for most assignments.)
+// ===========================================================================
+
+static void test_quadratization_tb(const CFN& cfn, const std::string& label) {
+    std::cerr << "[TB quadratization] " << label << "\n";
+    EncodingParams params;
+    params.encoding = "truncated_binary";
+    params.choice_ordering = "unsorted";
+    params.bitstring_ordering = "natural";
+    params.k_trunc = 3;
+
+    BitstringAssignment ba = compute_assignment(cfn, params);
+    auto hubo_res = encode_truncated_binary(cfn, ba, params);
+
+    int hubo_deg = hubo_res.poly.max_degree();
+    bool hubo_is_spin = (hubo_res.poly.var_type == VarType::SPIN);
+    std::cerr << "  HUBO max degree: " << hubo_deg
+              << "  basis: " << (hubo_is_spin ? "SPIN" : "BINARY") << "\n";
+
+    auto qr = rosenberg_quadratize(hubo_res.poly);
+
+    int qubo_deg = qr.poly.max_degree();
+    check(qubo_deg <= 2,
+          label + " TB QUBO degree <= 2 (got " + std::to_string(qubo_deg) + ")");
+    // Rosenberg output is always BINARY (SPIN inputs are converted first).
+    check(qr.poly.var_type == VarType::BINARY,
+          label + " TB QUBO is BINARY basis");
+
+    int num_aux = qr.num_auxiliaries;
+    int num_logical = hubo_res.num_logical_qubits;
+    int total_qubits = num_logical + num_aux;
+    std::cerr << "  Auxiliaries: " << num_aux
+              << ", total qubits: " << total_qubits << "\n";
+
+    if (num_aux > 20) {   // keep the exhaustive aux enumeration bounded
+        check(false, label + " TB aux count too large to verify exhaustively");
+        return;
+    }
+
+    for_each_choice(cfn, [&](const std::vector<int>& choices) {
+        // Register bits for this choice (bit b of the assigned bitstring).
+        std::vector<int> regbits(num_logical, 0);
+        for (int i = 0; i < cfn.num_variables; i++) {
+            int Di = hubo_res.bits_per_var[i];
+            int qs = hubo_res.qubit_start[i];
+            int bs = ba.assignment[i][choices[i]];
+            for (int b = 0; b < Di; b++)
+                regbits[qs + b] = (bs >> b) & 1;
+        }
+
+        // HUBO energy in its native basis: SPIN uses s_q = 1 - 2*bit.
+        std::vector<int> hv(num_logical);
+        for (int q = 0; q < num_logical; q++)
+            hv[q] = hubo_is_spin ? (1 - 2 * regbits[q]) : regbits[q];
+        double hubo_energy = evaluate(hubo_res.poly, hv);
+
+        // QUBO: logical vars are BINARY (= register bits); minimize over aux.
+        long long aux_configs = (num_aux > 0) ? (1LL << num_aux) : 1;
+        double min_qubo = std::numeric_limits<double>::max();
+        for (long long amask = 0; amask < aux_configs; amask++) {
+            std::vector<int> all_bits(total_qubits);
+            for (int q = 0; q < num_logical; q++)
+                all_bits[q] = regbits[q];
+            for (int a = 0; a < num_aux; a++)
+                all_bits[num_logical + a] = (int)((amask >> a) & 1);
+            min_qubo = std::min(min_qubo, evaluate(qr.poly, all_bits));
         }
 
         std::ostringstream msg;
@@ -834,6 +943,7 @@ int main() {
     auto cfn1   = make_cfn1();
     auto cfn2   = make_cfn2();
     auto cfn3   = make_cfn3();
+    auto cfn4   = make_cfn4();
     auto cfn_nl = make_cfn_nl();
 
     // ----- existing tests -----
@@ -853,9 +963,11 @@ int main() {
 
     // ----- new tests -----
     std::cerr << "\n=== Quadratization Tests ===\n";
-    test_quadratization_eb(cfn1, "CFN1 [3,2]");    // degree-3 HUBO
+    test_quadratization_eb(cfn1, "CFN1 [3,2]");    // degree-3 HUBO (BINARY)
     test_quadratization_eb(cfn2, "CFN2 [2,2,2]");  // degree-2 (no-op)
-    test_quadratization_eb(cfn3, "CFN3 [4,3]");    // degree-4 HUBO
+    test_quadratization_eb(cfn3, "CFN3 [4,3]");    // degree-4 HUBO (BINARY)
+    test_quadratization_tb(cfn3, "CFN3 [4,3]");    // degree-3 SPIN HUBO
+    test_quadratization_tb(cfn4, "CFN4 [8,5]");    // richer degree-3 SPIN HUBO
 
     std::cerr << "\n=== Choice & Bitstring Ordering Tests ===\n";
     test_bitstring_ordering();

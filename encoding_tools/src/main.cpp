@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <new>       // std::bad_alloc
 
 namespace fs = std::filesystem;
 
@@ -103,6 +104,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Everything below runs under one guard so a failure in setup (missing input
+    // directory, unwritable output, etc.) or an uncaught throw from any single
+    // file can never escape to std::terminate (which the cluster reports as a
+    // silent exit 134 / SIGABRT that kills the whole batch task).
+    int processed = 0;
+    int skipped = 0;
+    try {
+
     // Discover .cfn files
     std::vector<std::string> cfn_files;
     for (auto& entry : fs::directory_iterator(args.input_dir)) {
@@ -146,7 +155,6 @@ int main(int argc, char** argv) {
         std::cerr << "Processing " << cfn_files.size() << " CFN files with encoding: "
                   << args.params.encoding << "\n";
 
-    int processed = 0;
     for (auto& cfn_path : cfn_files) {
         try {
             Timer file_timer;
@@ -231,14 +239,41 @@ int main(int argc, char** argv) {
                 std::cerr << "  [" << processed << "/" << cfn_files.size() << "] "
                           << basename << " (" << result.time_total << "us)\n";
 
+        } catch (const std::bad_alloc&) {
+            // Out of memory on this instance (typically a large exact_binary /
+            // truncated_binary HUBO or its Rosenberg quadratization at high
+            // cardinality). Skip it instead of letting the throw reach
+            // std::terminate. Keep the handler allocation-free and swallow any
+            // secondary failure so it cannot escape either.
+            try { std::cerr << "Error processing " << cfn_path
+                            << ": out of memory (skipped)\n"; } catch (...) {}
+            skipped++;
         } catch (const std::exception& e) {
-            std::cerr << "Error processing " << cfn_path << ": " << e.what() << "\n";
+            try { std::cerr << "Error processing " << cfn_path
+                            << ": " << e.what() << "\n"; } catch (...) {}
+            skipped++;
+        } catch (...) {
+            try { std::cerr << "Error processing " << cfn_path
+                            << ": unknown error (skipped)\n"; } catch (...) {}
+            skipped++;
         }
     }
 
     if (args.verbose)
         std::cerr << "Done: " << processed << "/" << cfn_files.size()
-                  << " files processed.\n";
+                  << " files processed";
+    if (skipped > 0)
+        std::cerr << " (" << skipped << " skipped)";
+    if (args.verbose || skipped > 0)
+        std::cerr << ".\n";
+
+    } catch (const std::exception& e) {
+        std::cerr << "Fatal: " << e.what() << "\n";
+        return 1;
+    } catch (...) {
+        std::cerr << "Fatal: unknown error\n";
+        return 1;
+    }
 
     return 0;
 }

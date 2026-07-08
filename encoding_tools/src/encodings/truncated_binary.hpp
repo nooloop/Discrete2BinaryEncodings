@@ -2,6 +2,7 @@
 #include "baseline/cfn.hpp"
 #include "utilities/assignment.hpp"
 #include <cmath>
+#include <atomic>
 
 #ifdef HAS_OPENMP
 #include <omp.h>
@@ -174,11 +175,20 @@ inline EncodingResult encode_truncated_binary(const CFN& cfn,
     std::vector<std::vector<WalshTerm>> unary_terms(N);
     std::vector<std::vector<WalshTerm>> pairwise_terms(cfn.pairwise_tables.size());
 
+    // C++ exceptions must never leave an OpenMP parallel region: doing so calls
+    // std::terminate immediately (reported on the cluster as a silent exit 134),
+    // bypassing the per-file handler in main. Catch any throw (e.g. std::bad_alloc
+    // from a large FWHT buffer) inside each loop body, flag it, and re-throw once
+    // after the region so main can skip just this instance.
+    std::atomic<bool> enc_failed{false};
+    std::atomic<bool> enc_oom{false};
+
     // Unary tables
     #ifdef HAS_OPENMP
     #pragma omp parallel for schedule(dynamic) num_threads(params.num_threads)
     #endif
     for (int i = 0; i < N; i++) {
+      try {
         int di = cfn.cardinalities[i];
         int Di = result.bits_per_var[i];
         int total_bs = 1 << Di;
@@ -215,6 +225,12 @@ inline EncodingResult encode_truncated_binary(const CFN& cfn,
             std::sort(gbits.begin(), gbits.end());
             unary_terms[i].push_back({gbits, coeff});
         }
+      } catch (const std::bad_alloc&) { enc_oom = true; enc_failed = true; }
+        catch (...)                    { enc_failed = true; }
+    }
+    if (enc_failed) {
+        if (enc_oom) throw std::bad_alloc();
+        throw std::runtime_error("truncated_binary: unary encoding failed");
     }
 
     // Pairwise tables
@@ -222,6 +238,7 @@ inline EncodingResult encode_truncated_binary(const CFN& cfn,
     #pragma omp parallel for schedule(dynamic) num_threads(params.num_threads)
     #endif
     for (int tidx = 0; tidx < (int)cfn.pairwise_tables.size(); tidx++) {
+      try {
         auto& pt = cfn.pairwise_tables[tidx];
         int vi = pt.scope[0], vj = pt.scope[1];
         int di = cfn.cardinalities[vi], dj = cfn.cardinalities[vj];
@@ -269,6 +286,12 @@ inline EncodingResult encode_truncated_binary(const CFN& cfn,
             std::sort(gbits.begin(), gbits.end());
             pairwise_terms[tidx].push_back({gbits, coeff});
         }
+      } catch (const std::bad_alloc&) { enc_oom = true; enc_failed = true; }
+        catch (...)                    { enc_failed = true; }
+    }
+    if (enc_failed) {
+        if (enc_oom) throw std::bad_alloc();
+        throw std::runtime_error("truncated_binary: pairwise encoding failed");
     }
 
     // Merge into result polynomial

@@ -568,8 +568,15 @@ static void test_enhanced_binary_decode() {
         return state;
     };
 
-    for (bool spin : {false, true}) {
-        std::string enc = spin ? "truncated_binary" : "exact_binary";
+    // Cover all three binary encodings: exact_binary + approximate_binary are
+    // BINARY, truncated_binary is SPIN. The decode path is encoding-agnostic
+    // (it inverts choice_to_bitstring), so every one must round-trip.
+    struct DecodeCase { const char* enc; bool spin; };
+    for (DecodeCase dc : { DecodeCase{"exact_binary", false},
+                           DecodeCase{"approximate_binary", false},
+                           DecodeCase{"truncated_binary", true} }) {
+        std::string enc = dc.enc;
+        bool spin = dc.spin;
         BinaryModel model = parse_model_str(build_json(enc, spin, true));
         CHECK(!model.bitstring_to_choice.empty());
 

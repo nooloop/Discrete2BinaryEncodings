@@ -5,6 +5,7 @@
 #include <Eigen/SVD>
 #include <mutex>
 #include <cmath>
+#include <atomic>
 
 #ifdef HAS_OPENMP
 #include <omp.h>
@@ -310,11 +311,21 @@ inline EncodingResult encode_approximate_binary(const CFN& cfn,
         task_polys[tidx] = std::move(local_poly);
     };
 
+    // Exceptions must not escape the OpenMP region (that calls std::terminate,
+    // i.e. a silent exit 134). Catch inside, flag, and re-throw once afterwards.
+    std::atomic<bool> enc_failed{false};
+    std::atomic<bool> enc_oom{false};
 #ifdef HAS_OPENMP
     #pragma omp parallel for schedule(dynamic) num_threads(params.num_threads)
 #endif
     for (int tidx = 0; tidx < ntasks; tidx++) {
-        solve_task(tidx);
+        try { solve_task(tidx); }
+        catch (const std::bad_alloc&) { enc_oom = true; enc_failed = true; }
+        catch (...)                    { enc_failed = true; }
+    }
+    if (enc_failed) {
+        if (enc_oom) throw std::bad_alloc();
+        throw std::runtime_error("approximate_binary: encoding failed");
     }
 
     // Merge all task polynomials
