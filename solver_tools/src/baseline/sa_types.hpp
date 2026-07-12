@@ -54,7 +54,33 @@ struct SAParams {
                                             // enables decode + best_cfn_energy output)
     std::string schedule    = "geometric";  // "geometric" or "linear"
     std::string move_type   = "flip";       // "flip", "shift", "both" (CFN only)
-    double T_start          = 10.0;
+
+    // Temperatures. These are ENERGIES, and the energy scale is a property of the
+    // encoding, not of the problem: on one source CFN the encoded coefficients
+    // span |c|_max = 1.06 (truncated_binary) to 72 (Rosenberg-quadratized
+    // exact_binary), a factor of ~70. A fixed T window therefore anneals each
+    // encoding at a different point in ITS OWN landscape -- above every
+    // coefficient for one encoding (a random walk) and below the penalty scale
+    // for another (frozen from step 0) -- which confounds exactly the comparison
+    // this benchmark makes. D-Wave does not have this problem: it rescales every
+    // model onto the QPU's h/J range, so QA is implicitly scale-free.
+    //
+    // So the schedule is specified in ACCEPTANCE PROBABILITY, which is
+    // dimensionless, and T_start/T_end are calibrated per model from its own
+    // uphill-|dE| distribution (see solvers/temperature.hpp). The derived values
+    // are written to the T_start/T_end CSV columns, so each row records the
+    // temperatures actually used.
+    //
+    // Passing --T-start / --T-end pins that endpoint to an absolute energy and
+    // opts it out of calibration; --no-auto-temp restores the old fixed window.
+    bool   auto_temp        = true;
+    double accept_start     = 0.8;          // P(accept a typical uphill move) at T_start
+    double accept_end       = 0.01;         // P(accept a small uphill move) at T_end
+    int    temp_probes      = 1000;         // random states sampled to estimate |dE|
+    bool   T_start_given    = false;        // --T-start passed explicitly
+    bool   T_end_given      = false;        // --T-end passed explicitly
+
+    double T_start          = 10.0;         // fallback / --no-auto-temp value
     double T_end            = 0.01;
     int    num_runs         = 100;
     int    num_steps        = 0;            // If 0, compute from steps_multiplier
@@ -72,7 +98,22 @@ struct RunResult {
     double best_energy;
     double final_energy;
     double runtime_s;
-    std::vector<int> best_state;    // best state found during the run
+    std::vector<int> best_state;    // best state found during the run (encoding space)
+
+    // Best DECODED state of the run: the lowest source-CFN cost over every state
+    // the trajectory visited, not the CFN cost of best_state. The two differ --
+    // best_state minimizes the ENCODED energy, which is a different objective:
+    // for the cost-approximate encodings (AB, TB) it is a surrogate by
+    // construction, and for OH/DW/quadratized models it carries a Lagrange or
+    // Rosenberg penalty, so a run's lowest-energy state can even decode
+    // infeasibly while the trajectory did visit good feasible states. Tracking
+    // the decode along the trajectory is the SA counterpart of solve_qa decoding
+    // every read rather than only the lowest-energy sample.
+    //
+    // NaN / empty when the run never visited a feasible state, or when no source
+    // CFN was supplied (--cfn-dir).
+    double best_cfn_energy = std::numeric_limits<double>::quiet_NaN();
+    std::vector<int> best_cfn_state;   // decoded CFN choices at best_cfn_energy
 };
 
 // ============================================================================
@@ -158,16 +199,18 @@ struct AggregateResult {
     double std_energy    = 0;
     double median_energy = 0;
     int    num_optimal   = -1;
-    double total_runtime_s     = 0;
-    double mean_time_per_run_s = 0;   // total wall clock / num_runs (includes setup)
+    double total_runtime_s     = 0;   // solving this model: all runs + decode
+    double mean_time_per_run_s = 0;   // total_runtime_s / num_runs
     double mean_run_time_us    = 0;   // mean of the measured per-trajectory times
 
     // Per-run energies under the encoding. For the cost-approximate encodings
     // (approximate_binary, truncated_binary) these are NOT CFN costs.
     std::vector<double> per_run_energies;
 
-    // Per-run CFN cost of each run's decoded best state, index-aligned with
-    // per_run_energies. NaN for a run whose best state decoded infeasibly.
+    // Per-run BEST DECODED CFN cost -- the lowest source-CFN cost the run's
+    // trajectory visited, not the cost of the run's lowest-ENERGY state (see
+    // RunResult::best_cfn_energy). Index-aligned with per_run_energies; NaN for a
+    // run that never visited a feasible state.
     // Recorded so success counts can be re-derived post-hoc at any tolerance.
     std::vector<double> per_run_cfn_energies;
 
@@ -182,11 +225,13 @@ struct AggregateResult {
 
     std::vector<int> best_encoded_solution;   // raw state (qubits) at best_energy
 
-    // --- Decoded-CFN results (binary mode: decode best_state per run via
-    //     decode_to_cfn and evaluate the source CFN; cfn mode: native energy).
-    //     best_cfn_energy stays NaN when no source CFN is available or no run
-    //     decoded feasibly. Decoding honours natural (naive) and Gray/Boltzmann
-    //     (enhanced) layouts through the model's choice_to_bitstring map. ---
+    // --- Decoded-CFN results. best_cfn_energy is the lowest source-CFN cost any
+    //     run's trajectory visited; num_best_cfn is how many runs reached it
+    //     (so the per-run success probability for TTS is num_best_cfn/num_runs);
+    //     num_feasible is how many runs visited at least one feasible state.
+    //     Decoding honours natural (naive) and Gray/Boltzmann (enhanced) layouts
+    //     through the model's choice_to_bitstring map. best_cfn_energy stays NaN
+    //     when no source CFN is available or no run decoded feasibly. ---
     double best_cfn_energy = std::numeric_limits<double>::quiet_NaN();
     int    num_feasible    = -1;   // -1 => not computed (no source CFN)
     int    num_best_cfn    = -1;

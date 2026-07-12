@@ -17,6 +17,7 @@
 #include "utilities/parse_cfn.hpp"
 #include "solvers/sa_binary.hpp"
 #include "solvers/sa_cfn.hpp"
+#include "solvers/temperature.hpp"
 
 #include <nlohmann/json.hpp>
 #include <iostream>
@@ -687,6 +688,256 @@ static void test_sa_decode_enhanced_optimum() {
 }
 
 // ============================================================================
+// Test: the incremental CFN tracker against a brute-force oracle.
+//
+// CFNTracker maintains the decoded CFN cost in O(deg) per accepted flip, across
+// states whose registers decode infeasibly. The oracle re-decodes each visited
+// state from scratch (decode_to_cfn + compute_energy) and takes the min over the
+// feasible ones -- so a random walk must leave both with the same best.
+//
+// The walk covers every encoding family, because each stresses a different part
+// of the update: one-hot breaks and restores feasibility on nearly every flip,
+// domain-wall walks the wall, SPIN exercises the s -> b conversion, and the
+// quadratized models carry Rosenberg auxiliaries that map to no variable and
+// must leave the decode untouched.
+// ============================================================================
+static void test_cfn_tracker_vs_oracle() {
+    std::cout << "\n=== Incremental CFN Tracker vs Brute-Force Oracle ===\n";
+
+    CFNModel cfn = make_test_cfn();
+
+    struct Case { const char* label; const char* json; };
+    const Case cases[] = {
+        {"one_hot          ", JSON_ONE_HOT},
+        {"domain_wall      ", JSON_DOMAIN_WALL},
+        {"exact_binary     ", JSON_EXACT_BINARY},
+        {"exact_binary_quad", JSON_EXACT_BINARY_QUAD},
+        {"approx_binary    ", JSON_APPROXIMATE_BINARY},
+        {"trunc_k3_quad    ", JSON_TRUNCATED_K3_QUAD},
+    };
+
+    for (const auto& c : cases) {
+        BinaryModel model = parse_model_str(c.json);
+        const bool is_spin = (model.var_type == BinaryModel::SPIN);
+
+        std::mt19937_64 rng(12345);
+        std::uniform_int_distribution<int> qubit_dist(0, model.num_qubits - 1);
+
+        std::vector<int> state(model.num_qubits);
+        for (int q = 0; q < model.num_qubits; q++) {
+            int b = static_cast<int>(rng() & 1);
+            state[q] = is_spin ? (b * 2 - 1) : b;
+        }
+
+        CFNTracker tracker(model, cfn, state);
+
+        // Oracle: min CFN cost over every visited state that decodes feasibly.
+        double oracle = std::numeric_limits<double>::quiet_NaN();
+        auto observe = [&](const std::vector<int>& s) {
+            std::vector<int> ch = decode_to_cfn(model, s);
+            if (ch.empty()) return;                 // infeasible: not a candidate
+            double e = eval_cfn(cfn, ch);
+            if (std::isnan(oracle) || e < oracle) oracle = e;
+        };
+        observe(state);
+
+        for (int step = 0; step < 4000; step++) {
+            int q = qubit_dist(rng);
+            state[q] = is_spin ? -state[q] : 1 - state[q];
+            tracker.on_flip(q, state);              // walk accepts every move
+            observe(state);
+        }
+
+        double tracked = tracker.best_energy();
+        bool agree = (std::isnan(oracle) && std::isnan(tracked)) ||
+                     (std::abs(tracked - oracle) < 1e-9);
+        CHECK(agree);
+
+        // The reported cost must be the cost of the reported solution.
+        if (!std::isnan(tracked)) {
+            CHECK(std::abs(eval_cfn(cfn, tracker.best_choices()) - tracked) < 1e-9);
+        }
+
+        std::cout << "  " << c.label << ": tracker=" << tracked
+                  << "  oracle=" << oracle
+                  << (agree ? "  OK" : "  MISMATCH") << "\n";
+    }
+}
+
+// ============================================================================
+// Test: Rosenberg auxiliaries decode to nothing.
+//
+// qubit_map lists only logical qubits, and BinaryModel::QubitInfo default-
+// constructs to {variable 0, bit 0} -- so without an explicit -1 marker an
+// auxiliary is indistinguishable from bit 0 of variable 0, and flipping one
+// would corrupt variable 0's register. Flipping an auxiliary must leave the
+// decoded choices completely unchanged.
+// ============================================================================
+static void test_auxiliary_qubits_decode_to_nothing() {
+    std::cout << "\n=== Rosenberg Auxiliaries Decode To Nothing ===\n";
+
+    CFNModel cfn = make_test_cfn();
+    BinaryModel model = parse_model_str(JSON_EXACT_BINARY_QUAD);
+
+    CHECK(model.num_auxiliary > 0);
+
+    int n_aux_marked = 0;
+    for (int q = 0; q < model.num_qubits; q++)
+        if (model.qubit_to_var[q] < 0) n_aux_marked++;
+    CHECK(n_aux_marked == model.num_auxiliary);
+
+    std::vector<int> state(model.num_qubits, 0);
+    std::vector<int> before = decode_to_cfn(model, state);
+    CHECK(!before.empty());
+
+    CFNTracker tracker(model, cfn, state);
+    double best_before = tracker.best_energy();
+
+    for (int q = 0; q < model.num_qubits; q++) {
+        if (model.qubit_to_var[q] >= 0) continue;   // logical
+        state[q] = 1 - state[q];
+        tracker.on_flip(q, state);
+    }
+
+    CHECK(decode_to_cfn(model, state) == before);              // choices unchanged
+    CHECK(std::abs(tracker.best_energy() - best_before) < 1e-12);
+
+    std::cout << "  " << n_aux_marked << " auxiliaries flipped; decoded choices "
+              << fmt(before) << " unchanged\n";
+}
+
+// ============================================================================
+// Test: JSONL reader (encode_cfn --jsonl output).
+//
+// Blank lines are skipped, a malformed line is reported and skipped rather than
+// killing the shard, and the reported index is the 0-based line index that the
+// shard/line selectors in main.cpp partition on.
+// ============================================================================
+static void test_jsonl_reader() {
+    std::cout << "\n=== JSONL Reader ===\n";
+
+    const char* tmp = "_test_models_tmp.jsonl";
+    {
+        std::ofstream ofs(tmp);
+        ofs << nlohmann::json::parse(JSON_ONE_HOT).dump() << "\n"
+            << "\n"                                     // blank line: skipped
+            << "{ not valid json\n"                     // malformed: reported
+            << nlohmann::json::parse(JSON_EXACT_BINARY).dump() << "\n";
+    }
+
+    JsonlModelReader reader(tmp);
+    BinaryModel model;
+    std::string error;
+    int index = 0;
+
+    std::vector<std::string> encodings;
+    std::vector<int> indices;
+    int n_errors = 0;
+
+    while (reader.next(model, index, error)) {
+        if (!error.empty()) { n_errors++; continue; }
+        encodings.push_back(model.encoding);
+        indices.push_back(index);
+    }
+    std::remove(tmp);
+
+    CHECK(encodings.size() == 2);
+    CHECK(n_errors == 1);
+    CHECK(encodings[0] == "one_hot");
+    CHECK(encodings[1] == "exact_binary");
+    CHECK(indices[0] == 0);      // line 1
+    CHECK(indices[1] == 3);      // line 4 -- blank and malformed lines still count
+    CHECK(model.num_qubits > 0);
+
+    std::cout << "  2 models parsed, 1 malformed line skipped, blank line ignored\n";
+}
+
+// ============================================================================
+// Test: temperature calibration.
+//
+// The properties that make the encoding comparison fair:
+//
+//   (a) SCALE-FREE. Multiplying every coefficient of the model and its source
+//       CFN by k multiplies both temperatures by k and changes nothing else. A
+//       fixed T window has no such invariance -- it anneals a model at k=1 and
+//       the same model at k=70 in completely different regimes, which is exactly
+//       the confound, since the encodings of one CFN span ~70x in energy scale.
+//
+//   (b) SHARED COLD END. Every encoding of a given CFN cools to the SAME T_end,
+//       because the cold end is measured on the source CFN -- the one scale the
+//       encodings share, and the one the solver is scored on.
+//
+//   (c) ENCODING-SPECIFIC HOT END. A penalty encoding (one-hot: every flip pays
+//       the Lagrange penalty) must start hotter than a penalty-free one, or its
+//       chain cannot cross its own barriers.
+// ============================================================================
+static void test_temperature_calibration() {
+    std::cout << "\n=== Temperature Calibration ===\n";
+
+    CFNModel cfn = make_test_cfn();
+    SAParams params = test_params();
+
+    BinaryModel oh = parse_model_str(JSON_ONE_HOT);
+    BinaryModel eb = parse_model_str(JSON_EXACT_BINARY);
+
+    TemperatureRange t_oh = calibrate_temperatures(oh, &cfn, params, 99);
+    TemperatureRange t_eb = calibrate_temperatures(eb, &cfn, params, 99);
+
+    CHECK(t_oh.T_start > 0 && t_oh.T_end > 0);
+    CHECK(t_oh.T_end < t_oh.T_start);      // the schedule must cool
+
+    // (b) same source CFN => same cold end, whatever the encoding
+    CHECK(std::abs(t_oh.T_end - t_eb.T_end) < 1e-12);
+
+    // (c) the penalty encoding starts hotter
+    CHECK(t_oh.T_start > t_eb.T_start);
+
+    // (a) scale the encoded model AND the source CFN by k; T must scale by k
+    const double k = 100.0;
+    BinaryModel oh_k = oh;
+    for (auto& t : oh_k.terms) t.coeff *= k;
+    oh_k.offset *= k;
+    oh_k.build_adjacency();
+
+    CFNModel cfn_k = cfn;
+    for (auto& u : cfn_k.unary)
+        for (double& c : u) c *= k;
+    for (auto& pt : cfn_k.pairwise)
+        for (double& c : pt.costs) c *= k;
+
+    TemperatureRange t_k = calibrate_temperatures(oh_k, &cfn_k, params, 99);
+
+    CHECK(std::abs(t_k.T_start - k * t_oh.T_start) < 1e-6 * k * t_oh.T_start);
+    CHECK(std::abs(t_k.T_end   - k * t_oh.T_end)   < 1e-6 * k * t_oh.T_end);
+
+    // The hot end delivers the requested acceptance on a typical uphill move.
+    std::vector<double> uphill = sample_uphill(oh, params, 99);
+    double mean = uphill_mean(uphill);
+    double p_accept = std::exp(-mean / t_oh.T_start);
+    CHECK(std::abs(p_accept - params.accept_start) < 1e-9);
+
+    // --T-start / --T-end pin an endpoint and opt it out of calibration.
+    SAParams pinned = params;
+    pinned.T_start = 3.5;
+    pinned.T_start_given = true;
+    apply_temperature_calibration(pinned, oh, &cfn);
+    CHECK(pinned.T_start == 3.5);                          // untouched
+    CHECK(std::abs(pinned.T_end - t_oh.T_end) < 1e-12);    // still calibrated
+
+    SAParams off = params;
+    off.auto_temp = false;
+    double t0 = off.T_start, t1 = off.T_end;
+    apply_temperature_calibration(off, oh, &cfn);
+    CHECK(off.T_start == t0 && off.T_end == t1);           // --no-auto-temp
+
+    std::cout << "  one_hot     : T=" << t_oh.T_start << " -> " << t_oh.T_end << "\n"
+              << "  exact_binary: T=" << t_eb.T_start << " -> " << t_eb.T_end
+              << "   (same cold end, cooler hot end)\n"
+              << "  scaled x100 : T=" << t_k.T_start << " -> " << t_k.T_end
+              << "   (both scale exactly)\n";
+}
+
+// ============================================================================
 // Main test driver
 // ============================================================================
 int main() {
@@ -720,6 +971,12 @@ int main() {
     // ------- Enhanced (Gray / Boltzmann / LI) decode -------
     test_enhanced_binary_decode();
     test_sa_decode_enhanced_optimum();
+
+    // ------- Trajectory decoding, auxiliaries, JSONL -------
+    test_temperature_calibration();
+    test_cfn_tracker_vs_oracle();
+    test_auxiliary_qubits_decode_to_nothing();
+    test_jsonl_reader();
 
     // ------- Summary -------
     std::cout << "\n========================================\n"

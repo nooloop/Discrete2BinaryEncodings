@@ -87,6 +87,13 @@ inline RunResult run_sa_cfn(
     result.best_energy  = best_energy;
     result.final_energy = energy;
     result.runtime_s    = timer.elapsed();
+
+    // Native CFN: the state IS the choice vector and the energy IS the CFN cost,
+    // so the run's best state is trivially its best decode. Filling these here
+    // lets main.cpp aggregate both modes through one code path.
+    result.best_cfn_energy = best_energy;
+    result.best_cfn_state  = best_state;
+
     result.best_state   = std::move(best_state);
     return result;
 }

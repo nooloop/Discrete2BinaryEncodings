@@ -18,13 +18,14 @@
 //   best_cfn_solution     / per_run_cfn_energies  under the SOURCE CFN
 // For the cost-approximate encodings (approximate_binary, truncated_binary) the
 // encoded energy is not the CFN cost, so only the *_cfn_* columns are
-// comparable across encodings.
+// comparable across encodings. The *_cfn_* columns hold the best DECODED cost
+// over each run's trajectory, not the cost of the run's lowest-energy state --
+// the two differ, and only the former is a fair score (see cfn_tracker.hpp).
 //
 // per_run_times_us is the measured wall time of each individual trajectory (the
 // anneal only, in microseconds), index-aligned with the two energy vectors, with
-// mean_run_time_us its mean. Do not confuse it with mean_time_per_run_s, which is
-// the whole-process wall clock divided by num_runs and therefore also carries the
-// model parsing, source-CFN loading and decoding overhead.
+// mean_run_time_us its mean. mean_time_per_run_s is coarser: total_runtime_s (all
+// runs for this model, including the decode) divided by num_runs.
 // ============================================================================
 
 inline std::string csv_core_header() {
