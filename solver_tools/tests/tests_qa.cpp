@@ -315,7 +315,7 @@ static void test_csv_format() {
     r.variable_type = "BINARY"; r.distribution = "uniform";
     r.solver_name = "Test"; r.num_reads = 10;
     r.per_run_energies = {1.0, 2.0};
-    r.best_solution = {3, 1};
+    r.best_cfn_solution = {3, 1};
 
     std::string row = csv_row_qa(r);
     int r_cols = 1;
@@ -743,7 +743,7 @@ static void run_dwave_test(
               << "\n    best_dwave=" << result.best_energy
               << "  best_cfn=" << result.best_cfn_energy
               << "  feasible=" << result.num_feasible << "/" << result.num_reads
-              << "  solution=" << fmt(result.best_solution)
+              << "  solution=" << fmt(result.best_cfn_solution)
               << "\n";
 }
 
