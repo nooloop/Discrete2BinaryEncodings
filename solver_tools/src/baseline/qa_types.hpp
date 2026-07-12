@@ -101,6 +101,13 @@ struct QAResult {
     double qpu_sampling_time_us    = 0;
     double qpu_programming_time_us = 0;
 
+    // Mean time of a single anneal, in microseconds: the QA counterpart of the
+    // SA per-trajectory time, so both solvers fill the same core column. The QPU
+    // reports sampling time for the batch rather than per read, so this is
+    // qpu_sampling_time_us / num_reads. per_run_times_us is left empty (-> NA):
+    // unlike SA, there is no measured time for an individual read to record.
+    double mean_run_time_us = 0;
+
     // --- Embedding statistics ---
     int    emb_num_physical_qubits = 0;
     double emb_chain_length_avg    = 0;
@@ -116,6 +123,17 @@ struct QAResult {
     int    num_best_cfn    = 0;
 
     // --- Solutions ---
-    std::vector<int>    best_solution;       // best decoded CFN choices
-    std::vector<double> per_run_energies;    // all D-Wave energies (expanded)
+    std::vector<int> best_encoded_solution;  // raw sample (qubits) at best_energy
+    std::vector<int> best_cfn_solution;      // decoded CFN choices at best_cfn_energy
+
+    // Per-read vectors, expanded by num_occurrences and index-aligned with each
+    // other: entry k is the same read under the encoding and under the CFN.
+    // per_run_cfn_energies is NaN for a read that decoded infeasibly.
+    std::vector<double> per_run_energies;      // D-Wave energies (encoding)
+    std::vector<double> per_run_cfn_energies;  // decoded CFN costs
+
+    // Always empty for QA (-> NA in the CSV): the QPU does not report a time for
+    // an individual read. Use mean_run_time_us instead. Present so the shared
+    // core column exists in both solvers' output.
+    std::vector<double> per_run_times_us;
 };

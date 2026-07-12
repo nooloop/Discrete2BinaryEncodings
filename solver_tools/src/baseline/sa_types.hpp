@@ -159,10 +159,28 @@ struct AggregateResult {
     double median_energy = 0;
     int    num_optimal   = -1;
     double total_runtime_s     = 0;
-    double mean_time_per_run_s = 0;
+    double mean_time_per_run_s = 0;   // total wall clock / num_runs (includes setup)
+    double mean_run_time_us    = 0;   // mean of the measured per-trajectory times
 
+    // Per-run energies under the encoding. For the cost-approximate encodings
+    // (approximate_binary, truncated_binary) these are NOT CFN costs.
     std::vector<double> per_run_energies;
-    std::vector<int> best_solution;   // best state across all runs (raw)
+
+    // Per-run CFN cost of each run's decoded best state, index-aligned with
+    // per_run_energies. NaN for a run whose best state decoded infeasibly.
+    // Recorded so success counts can be re-derived post-hoc at any tolerance.
+    std::vector<double> per_run_cfn_energies;
+
+    // Wall time of each SA trajectory in MICROSECONDS, index-aligned with the
+    // vectors above. This is the anneal itself (RNG init, initial energy, and
+    // the num_steps Metropolis sweeps) and excludes model parsing, source-CFN
+    // loading and decoding -- unlike mean_time_per_run_s, which is the whole
+    // process wall clock divided by num_runs. It is the SA counterpart of the
+    // QA per-read sampling time, so a time-to-solution built on it is directly
+    // comparable across the two solvers.
+    std::vector<double> per_run_times_us;
+
+    std::vector<int> best_encoded_solution;   // raw state (qubits) at best_energy
 
     // --- Decoded-CFN results (binary mode: decode best_state per run via
     //     decode_to_cfn and evaluate the source CFN; cfn mode: native energy).
@@ -186,8 +204,14 @@ inline AggregateResult aggregate_runs(const std::vector<RunResult>& runs,
     agg.mean_time_per_run_s = total_time / n;
 
     agg.per_run_energies.resize(n);
-    for (int i = 0; i < n; i++)
+    agg.per_run_times_us.resize(n);
+    for (int i = 0; i < n; i++) {
         agg.per_run_energies[i] = runs[i].best_energy;
+        agg.per_run_times_us[i] = runs[i].runtime_s * 1e6;
+    }
+
+    agg.mean_run_time_us = std::accumulate(
+        agg.per_run_times_us.begin(), agg.per_run_times_us.end(), 0.0) / n;
 
     agg.best_energy = *std::min_element(
         agg.per_run_energies.begin(), agg.per_run_energies.end());
@@ -195,7 +219,7 @@ inline AggregateResult aggregate_runs(const std::vector<RunResult>& runs,
     // Store best solution
     for (int i = 0; i < n; i++) {
         if (runs[i].best_energy == agg.best_energy) {
-            agg.best_solution = runs[i].best_state;
+            agg.best_encoded_solution = runs[i].best_state;
             break;
         }
     }

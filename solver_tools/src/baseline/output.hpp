@@ -3,12 +3,31 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <cmath>
 
 // ============================================================================
 // CSV output for solver results.
+//
+// Columns 1-31 are the shared core, identical in name, order and meaning to
+// solve_qa (see output_qa.hpp), so SA and QA rows can be concatenated and
+// analysed with one code path. solve_qa appends its QPU-specific columns after
+// the core.
+//
+// Two solution columns, two energy vectors -- they mean different things:
+//   best_encoded_solution / per_run_energies      under the ENCODING
+//   best_cfn_solution     / per_run_cfn_energies  under the SOURCE CFN
+// For the cost-approximate encodings (approximate_binary, truncated_binary) the
+// encoded energy is not the CFN cost, so only the *_cfn_* columns are
+// comparable across encodings.
+//
+// per_run_times_us is the measured wall time of each individual trajectory (the
+// anneal only, in microseconds), index-aligned with the two energy vectors, with
+// mean_run_time_us its mean. Do not confuse it with mean_time_per_run_s, which is
+// the whole-process wall clock divided by num_runs and therefore also carries the
+// model parsing, source-CFN loading and decoding overhead.
 // ============================================================================
 
-inline std::string csv_header() {
+inline std::string csv_core_header() {
     return
         "problem_name,"
         "source_cfn,"
@@ -34,12 +53,19 @@ inline std::string csv_header() {
         "num_optimal,"
         "total_runtime_s,"
         "mean_time_per_run_s,"
-        "best_solution,"
+        "mean_run_time_us,"
+        "best_encoded_solution,"
+        "best_cfn_solution,"
         "per_run_energies,"
+        "per_run_cfn_energies,"
+        "per_run_times_us,"
         "best_cfn_energy,"
         "num_feasible,"
-        "num_best_cfn,"
-        "best_cfn_solution";
+        "num_best_cfn";
+}
+
+inline std::string csv_header() {
+    return csv_core_header();
 }
 
 inline std::string format_solution(const std::vector<int>& sol) {
@@ -49,6 +75,22 @@ inline std::string format_solution(const std::vector<int>& sol) {
     for (int k = 0; k < static_cast<int>(sol.size()); k++) {
         if (k > 0) ss << ",";
         ss << sol[k];
+    }
+    ss << "]\"";
+    return ss.str();
+}
+
+// Quoted JSON array of doubles; NaN entries (infeasible decodes) render as null
+// so the column parses as JSON and the infeasible runs stay visible.
+inline std::string format_energies(const std::vector<double>& v) {
+    if (v.empty()) return "NA";
+    std::ostringstream ss;
+    ss << std::setprecision(12);
+    ss << "\"[";
+    for (int k = 0; k < static_cast<int>(v.size()); k++) {
+        if (k > 0) ss << ",";
+        if (std::isnan(v[k])) ss << "null";
+        else                  ss << v[k];
     }
     ss << "]\"";
     return ss.str();
@@ -87,27 +129,20 @@ inline std::string csv_row(const AggregateResult& r) {
 
     ss << r.total_runtime_s << ",";
     ss << r.mean_time_per_run_s << ",";
+    ss << r.mean_run_time_us << ",";
 
-    ss << format_solution(r.best_solution) << ",";
+    ss << format_solution(r.best_encoded_solution) << ",";
+    ss << format_solution(r.best_cfn_solution) << ",";
+    ss << format_energies(r.per_run_energies) << ",";
+    ss << format_energies(r.per_run_cfn_energies) << ",";
+    ss << format_energies(r.per_run_times_us) << ",";
 
-    // Per-run energies as quoted JSON array
-    ss << "\"[";
-    for (int k = 0; k < static_cast<int>(r.per_run_energies.size()); k++) {
-        if (k > 0) ss << ",";
-        ss << r.per_run_energies[k];
-    }
-    ss << "]\"";
-
-    // --- Decoded-CFN columns (appended) ---
-    ss << ",";
     if (std::isnan(r.best_cfn_energy)) ss << "NA";
     else                               ss << r.best_cfn_energy;
     ss << ",";
     if (r.num_feasible < 0) ss << "NA"; else ss << r.num_feasible;
     ss << ",";
     if (r.num_best_cfn < 0) ss << "NA"; else ss << r.num_best_cfn;
-    ss << ",";
-    ss << format_solution(r.best_cfn_solution);
 
     return ss.str();
 }
