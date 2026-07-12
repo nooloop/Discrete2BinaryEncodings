@@ -340,16 +340,57 @@ inline QAResult run_qa_binary(
         throw std::runtime_error("D-Wave returned no samples.");
 
     // ------------------------------------------------------------------
-    // 6. Expand energies and compute statistics
+    // 6. Expand energies and decode each sample to CFN choices.
+    //
+    // One pass over the unique samples, so all_energies (encoding) and
+    // all_cfn_energies (source CFN) stay index-aligned read-for-read. Decoding
+    // inverts the model's choice_to_bitstring map, so it is correct for both
+    // the naive (unsorted+natural) and enhanced (Boltzmann+Gray) assignments,
+    // and yields the true CFN cost even for the cost-approximate encodings,
+    // whose D-Wave energy is not a CFN cost.
     // ------------------------------------------------------------------
     std::vector<double> all_energies;
+    std::vector<double> all_cfn_energies;
     all_energies.reserve(params.num_reads);
-    for (const auto& s : dwave.samples)
-        for (int k = 0; k < s.num_occurrences; k++)
-            all_energies.push_back(s.energy);
+    all_cfn_energies.reserve(params.num_reads);
 
-    double best_dw = *std::min_element(
-        all_energies.begin(), all_energies.end());
+    const double NaN = std::numeric_limits<double>::quiet_NaN();
+
+    double best_cfn = std::numeric_limits<double>::infinity();
+    std::vector<int> best_cfn_sol;
+    int num_feasible = 0;
+    int num_best_cfn = 0;
+
+    double best_dw = std::numeric_limits<double>::infinity();
+    std::vector<int> best_encoded_sol;
+
+    for (const auto& s : dwave.samples) {
+        if (s.energy < best_dw) {
+            best_dw          = s.energy;
+            best_encoded_sol = s.values;
+        }
+
+        std::vector<int> choices = decode_to_cfn(model, s.values);
+        double cfn_energy = NaN;
+
+        if (!choices.empty()) {          // feasible decode
+            cfn_energy = compute_energy(cfn, choices);
+            num_feasible += s.num_occurrences;
+
+            if (cfn_energy < best_cfn - params.tolerance) {
+                best_cfn     = cfn_energy;
+                best_cfn_sol = choices;
+                num_best_cfn = s.num_occurrences;
+            } else if (std::abs(cfn_energy - best_cfn) <= params.tolerance) {
+                num_best_cfn += s.num_occurrences;
+            }
+        }
+
+        for (int k = 0; k < s.num_occurrences; k++) {
+            all_energies.push_back(s.energy);
+            all_cfn_energies.push_back(cfn_energy);
+        }
+    }
 
     double sum = std::accumulate(
         all_energies.begin(), all_energies.end(), 0.0);
@@ -370,31 +411,7 @@ inline QAResult run_qa_binary(
         : 0.5 * (sorted_e[n / 2 - 1] + sorted_e[n / 2]);
 
     // ------------------------------------------------------------------
-    // 7. Decode bitstrings and evaluate under source CFN
-    // ------------------------------------------------------------------
-    double best_cfn = std::numeric_limits<double>::infinity();
-    std::vector<int> best_cfn_sol;
-    int num_feasible = 0;
-    int num_best_cfn = 0;
-
-    for (const auto& s : dwave.samples) {
-        std::vector<int> choices = decode_to_cfn(model, s.values);
-        if (choices.empty()) continue;       // infeasible
-
-        double cfn_energy = compute_energy(cfn, choices);
-        num_feasible += s.num_occurrences;
-
-        if (cfn_energy < best_cfn - params.tolerance) {
-            best_cfn     = cfn_energy;
-            best_cfn_sol = choices;
-            num_best_cfn = s.num_occurrences;
-        } else if (std::abs(cfn_energy - best_cfn) <= params.tolerance) {
-            num_best_cfn += s.num_occurrences;
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // 8. Count ground-truth hits (under encoding energy)
+    // 7. Count ground-truth hits (under encoding energy)
     // ------------------------------------------------------------------
     int num_optimal = -1;
     if (!std::isnan(params.ground_truth)) {
@@ -492,6 +509,11 @@ inline QAResult run_qa_binary(
     result.qpu_sampling_time_us    = dwave.timing.qpu_sampling_time_us;
     result.qpu_programming_time_us = dwave.timing.qpu_programming_time_us;
 
+    // Per-anneal time, the QA counterpart of the SA per-trajectory time.
+    result.mean_run_time_us = (params.num_reads > 0)
+        ? dwave.timing.qpu_sampling_time_us / params.num_reads
+        : 0.0;
+
     result.emb_num_physical_qubits = dwave.num_physical_qubits;
     result.emb_chain_length_avg    = cl_avg;
     result.emb_chain_length_median = cl_median;
@@ -504,8 +526,11 @@ inline QAResult run_qa_binary(
                              : std::numeric_limits<double>::quiet_NaN();
     result.num_feasible    = num_feasible;
     result.num_best_cfn    = num_best_cfn;
-    result.best_solution   = best_cfn_sol;
-    result.per_run_energies = std::move(all_energies);
+
+    result.best_encoded_solution = std::move(best_encoded_sol);
+    result.best_cfn_solution     = std::move(best_cfn_sol);
+    result.per_run_energies      = std::move(all_energies);
+    result.per_run_cfn_energies  = std::move(all_cfn_energies);
 
     return result;
 }

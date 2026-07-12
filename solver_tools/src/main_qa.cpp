@@ -152,13 +152,13 @@ int main(int argc, char** argv) {
             std::cerr << "  Feasible samples:    " << result.num_feasible
                       << " / " << result.num_reads << "\n";
             std::cerr << "  Best CFN solution:   ";
-            if (result.best_solution.empty())
+            if (result.best_cfn_solution.empty())
                 std::cerr << "NA\n";
             else {
                 std::cerr << "[";
-                for (int k = 0; k < static_cast<int>(result.best_solution.size()); k++) {
+                for (int k = 0; k < static_cast<int>(result.best_cfn_solution.size()); k++) {
                     if (k > 0) std::cerr << ",";
-                    std::cerr << result.best_solution[k];
+                    std::cerr << result.best_cfn_solution[k];
                 }
                 std::cerr << "]\n";
             }

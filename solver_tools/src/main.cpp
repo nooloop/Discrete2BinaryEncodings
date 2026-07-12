@@ -117,6 +117,7 @@ int main(int argc, char** argv) {
         int    cfn_num_feasible = -1;   // -1 => not computed
         int    cfn_num_best     = -1;
         std::vector<int> cfn_best_solution;
+        std::vector<double> cfn_per_run;   // per-run CFN cost, NaN if infeasible
 
         std::string filename = path_basename(params.input_path);
 
@@ -181,12 +182,18 @@ int main(int argc, char** argv) {
                         CFNModel src = parse_cfn_for_sa(cfn_path);
                         cfn_num_feasible = 0;
                         cfn_num_best     = 0;
+                        cfn_per_run.reserve(runs.size());
                         double best = std::numeric_limits<double>::infinity();
                         for (const auto& rr : runs) {
                             std::vector<int> ch = decode_to_cfn(model, rr.best_state);
-                            if (ch.empty()) continue;   // infeasible decode
+                            if (ch.empty()) {   // infeasible decode
+                                cfn_per_run.push_back(
+                                    std::numeric_limits<double>::quiet_NaN());
+                                continue;
+                            }
                             cfn_num_feasible++;
                             double ce = compute_energy(src, ch);
+                            cfn_per_run.push_back(ce);
                             if (ce < best - params.tolerance) {
                                 best = ce;
                                 cfn_best_solution = ch;
@@ -251,10 +258,12 @@ int main(int argc, char** argv) {
             // the CFN cost, so best_cfn_energy mirrors the native result.
             cfn_num_feasible = 0;
             cfn_num_best     = 0;
+            cfn_per_run.reserve(runs.size());
             double best = std::numeric_limits<double>::infinity();
             for (const auto& rr : runs) {
                 cfn_num_feasible++;
                 double ce = rr.best_energy;
+                cfn_per_run.push_back(ce);
                 if (ce < best - params.tolerance) {
                     best = ce;
                     cfn_best_solution = rr.best_state;
@@ -283,13 +292,16 @@ int main(int argc, char** argv) {
         agg.median_energy         = stats.median_energy;
         agg.total_runtime_s       = stats.total_runtime_s;
         agg.mean_time_per_run_s   = stats.mean_time_per_run_s;
+        agg.mean_run_time_us      = stats.mean_run_time_us;
         agg.per_run_energies      = stats.per_run_energies;
-        agg.best_solution         = stats.best_solution;
+        agg.per_run_times_us      = stats.per_run_times_us;
+        agg.best_encoded_solution = stats.best_encoded_solution;
 
         agg.best_cfn_energy       = cfn_best_energy;
         agg.num_feasible          = cfn_num_feasible;
         agg.num_best_cfn          = cfn_num_best;
         agg.best_cfn_solution     = cfn_best_solution;
+        agg.per_run_cfn_energies  = cfn_per_run;
 
         if (!std::isnan(params.ground_truth)) {
             agg.num_optimal = 0;
